@@ -21,7 +21,7 @@ TITLE, DESC, QUESTION, TIMER, SHUFFLE, NEGATIVE = range(6)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
 
-    # Group start
+    # GROUP START
     if args:
         quiz_id = args[0]
         quiz = context.bot_data.get("quizzes", {}).get(quiz_id)
@@ -35,8 +35,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         btn = [[InlineKeyboardButton("✅ Ready (0/2)", callback_data=f"ready_{quiz_id}")]]
+
         await update.message.reply_text(
-            f"👥 Waiting for 2 players...\nTap Ready",
+            f"🎲 Get ready for quiz '{quiz['title']}'\n\n"
+            f"🖊 {len(quiz['questions'])} questions\n"
+            f"⏱ {quiz['timer']} sec per question\n\n"
+            f"🏁 Quiz will start when 2 players are ready\n"
+            f"Ready: 0",
             reply_markup=InlineKeyboardMarkup(btn)
         )
         return
@@ -47,7 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
-# ───── CREATE ─────
+# ───── CREATE FLOW ─────
 async def create(update, context):
     await update.message.reply_text("📌 Send Title")
     return TITLE
@@ -109,7 +114,7 @@ async def shuffle(update, context):
     await update.message.reply_text("➖ Negative?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return NEGATIVE
 
-# ───── SAVE ─────
+# ───── SAVE QUIZ ─────
 async def negative(update, context):
     context.user_data['neg'] = float(update.message.text)
 
@@ -136,6 +141,7 @@ async def ready_btn(update, context):
 
     quiz_id = q.data.split("_")[1]
     data = context.chat_data.get("waiting")
+
     if not data:
         return
 
@@ -155,12 +161,12 @@ async def ready_btn(update, context):
             "quiz": data["quiz"],
             "index": 0,
             "score": {},
-            "players": players
+            "players": players.copy()
         }
 
         context.chat_data.pop("waiting", None)
 
-        await q.message.reply_text("🚀 Quiz Started!")
+        await q.message.reply_text(f"🚀 Quiz Started: {data['quiz']['title']}")
         await send_q(context, q.message.chat.id)
 
 # ───── DIRECT START ─────
@@ -187,6 +193,7 @@ async def start_btn(update, context):
 # ───── SEND QUESTION ─────
 async def send_q(context, chat_id):
     data = context.chat_data.get('quiz')
+
     if not data:
         return
 
@@ -202,9 +209,10 @@ async def send_q(context, chat_id):
             except:
                 name = str(uid)
 
-            text += f"{name} → {sc}\n"
+            text += f"🏆 {name} → {sc}\n"
 
         await context.bot.send_message(chat_id, text)
+        context.chat_data.pop("quiz", None)
         return
 
     q = quiz['questions'][data['index']]
@@ -213,10 +221,10 @@ async def send_q(context, chat_id):
     correct = q['ans']
 
     if quiz['shuffle']:
-        combined = list(enumerate(opts))
-        random.shuffle(combined)
-        opts = [x[1] for x in combined]
-        correct = [i for i, x in enumerate(combined) if x[0] == q['ans']][0]
+        indexed = list(enumerate(opts))
+        random.shuffle(indexed)
+        opts = [x[1] for x in indexed]
+        correct = [i for i, x in enumerate(indexed) if x[0] == q['ans']][0]
 
     await context.bot.send_poll(
         chat_id,
