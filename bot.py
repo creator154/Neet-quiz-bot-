@@ -1,4 +1,4 @@
-import logging, os, uuid, asyncio, random
+import logging, os, uuid, asyncio
 from telegram import *
 from telegram.ext import *
 
@@ -17,7 +17,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
-# ───── CREATE FLOW ─────
+# ───── CREATE ─────
 async def create(update, context):
     await update.message.reply_text("📌 Send Title")
     return TITLE
@@ -69,14 +69,10 @@ async def done(update, context):
 
 async def timer(update, context):
     context.user_data['timer'] = int(update.message.text)
-    kb = [["Shuffle","No Shuffle"]]
-    await update.message.reply_text("🔀 Shuffle?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return SHUFFLE
 
 async def shuffle(update, context):
     context.user_data['shuffle'] = update.message.text == "Shuffle"
-    kb = [["0","0.5","1"]]
-    await update.message.reply_text("➖ Negative?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return NEGATIVE
 
 async def negative(update, context):
@@ -85,7 +81,7 @@ async def negative(update, context):
     quiz_id = str(uuid.uuid4())[:8]
     context.bot_data.setdefault("quizzes", {})[quiz_id] = context.user_data.copy()
 
-    btn = [[InlineKeyboardButton("🚀 Start Quiz", callback_data=f"start_{quiz_id}")]]
+    btn = [[InlineKeyboardButton("🚀 Start Quiz in Group", callback_data=f"start_{quiz_id}")]]
     await update.message.reply_text(
         f"✅ Quiz Saved\nID: {quiz_id}",
         reply_markup=InlineKeyboardMarkup(btn)
@@ -94,7 +90,7 @@ async def negative(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ───── READY SYSTEM ─────
+# ───── START BUTTON (GROUP) ─────
 async def start_btn(update, context):
     q = update.callback_query
     await q.answer()
@@ -107,7 +103,7 @@ async def start_btn(update, context):
 
     context.chat_data['waiting'] = {
         "quiz": quiz,
-        "ready_users": set()
+        "ready": set()
     }
 
     btn = [[InlineKeyboardButton("✅ I am Ready", callback_data="ready")]]
@@ -116,11 +112,11 @@ async def start_btn(update, context):
         f"🎯 Get ready for quiz '{quiz['title']}'\n"
         f"📝 {len(quiz['questions'])} questions\n"
         f"⏱ {quiz['timer']} sec per question\n\n"
-        f"Minimum 2 players required\nReady: 0",
+        f"Ready: 0/2",
         reply_markup=InlineKeyboardMarkup(btn)
     )
 
-# ───── READY CLICK ─────
+# ───── READY ─────
 async def ready_btn(update, context):
     q = update.callback_query
     await q.answer()
@@ -129,12 +125,11 @@ async def ready_btn(update, context):
     if not data:
         return
 
-    data['ready_users'].add(q.from_user.id)
-    count = len(data['ready_users'])
+    data['ready'].add(q.from_user.id)
+    count = len(data['ready'])
 
     await q.edit_message_text(
-        f"🎯 Quiz: {data['quiz']['title']}\n"
-        f"Ready: {count}/2"
+        f"🎯 Quiz: {data['quiz']['title']}\nReady: {count}/2"
     )
 
     if count >= 2:
@@ -147,10 +142,10 @@ async def ready_btn(update, context):
             "score": {}
         }
 
-        await q.message.reply_text(f"🚀 Quiz Started!")
+        await q.message.reply_text("🚀 Quiz Started!")
         await send_q(context, q.message.chat.id)
 
-# ───── SEND QUESTION ─────
+# ───── SEND QUESTION (FIXED) ─────
 async def send_q(context, chat_id):
     data = context.chat_data.get('quiz')
     if not data:
@@ -169,10 +164,10 @@ async def send_q(context, chat_id):
     q = quiz['questions'][data['index']]
 
     try:
-        msg = await context.bot.send_poll(
-            chat_id=chat_id,
-            question=q['q'],
-            options=q['opts'],
+        await context.bot.send_poll(
+            chat_id,
+            q['q'],
+            q['opts'],
             type=Poll.QUIZ,
             correct_option_id=q['ans'],
             is_anonymous=False,
@@ -180,7 +175,7 @@ async def send_q(context, chat_id):
         )
     except Exception as e:
         print("POLL ERROR:", e)
-        await context.bot.send_message(chat_id, "❌ Poll failed")
+        await context.bot.send_message(chat_id, "❌ Poll error")
         return
 
     data['index'] += 1
