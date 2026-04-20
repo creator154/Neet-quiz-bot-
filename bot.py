@@ -531,3 +531,417 @@ async def begin_or_advance_exam(context, session_id: str) -> None:
             is_anonymous=False,
             allows_multiple_answers=False,
             correct_option_id=int(q["correct_option"]),
+            
+base.build_app = build_app
+
+
+def everyone_private_commands() -> List[BotCommand]:
+    return [
+        BotCommand("start", "Activate bot / open practice links"),
+        BotCommand("help", "Help and commands"),
+        BotCommand("commands", "Command list"),
+        BotCommand("pauseq", "Pause your private practice"),
+        BotCommand("resumeq", "Resume your private practice"),
+        BotCommand("skipq", "Skip current private question"),
+        BotCommand("stoptqex", "Stop active private exam or practice"),
+    ]
+
+
+
+def admin_private_commands() -> List[BotCommand]:
+    return everyone_private_commands() + [
+        BotCommand("panel", "Admin panel"),
+        BotCommand("newexam", "Create new exam draft"),
+        BotCommand("drafts", "My drafts"),
+        BotCommand("csvformat", "CSV import format"),
+        BotCommand("importtext", "Import MCQs from text / TXT"),
+        BotCommand("txtquiz", "Alias of importtext"),
+        BotCommand("clonequiz", "Start QuizBot clone workflow"),
+        BotCommand("cloneend", "Finish clone workflow"),
+        BotCommand("draftinfo", "Show draft details"),
+        BotCommand("settitle", "Edit draft title"),
+        BotCommand("settime", "Edit time per question"),
+        BotCommand("setneg", "Edit negative marking"),
+        BotCommand("shuffle", "Shuffle draft questions"),
+        BotCommand("delq", "Delete question numbers"),
+        BotCommand("section", "Add section timing"),
+        BotCommand("sections", "List draft sections"),
+        BotCommand("clearsections", "Remove all sections"),
+        BotCommand("creator", "Show draft creator info"),
+        BotCommand("renamefile", "Rename a file in bot inbox"),
+        BotCommand("setthumb", "Set preview thumbnail"),
+        BotCommand("clearthumb", "Clear thumbnail"),
+        BotCommand("thumbstatus", "Thumbnail status"),
+        BotCommand("cancel", "Cancel current input flow"),
+    ]
+
+
+
+def owner_private_commands() -> List[BotCommand]:
+    return admin_private_commands() + [
+        BotCommand("addadmin", "Add isolated admin"),
+        BotCommand("addadminalp", "Add all-access admin"),
+        BotCommand("rmadmin", "Remove admin"),
+        BotCommand("admins", "List admin roles"),
+        BotCommand("audit", "Recent admin actions"),
+        BotCommand("logs", "Bot logs summary"),
+        BotCommand("broadcast", "Broadcast to groups and users"),
+        BotCommand("announce", "Announce to one chat"),
+        BotCommand("restart", "Restart bot"),
+    ]
+
+
+
+def group_admin_commands() -> List[BotCommand]:
+    return [
+        BotCommand("binddraft", "Bind a draft to this group"),
+        BotCommand("examstatus", "Show current draft and exam state"),
+        BotCommand("starttqex", "Show ready button or start selected exam"),
+        BotCommand("pauseq", "Pause after the current question"),
+        BotCommand("resumeq", "Resume a paused exam"),
+        BotCommand("skipq", "Skip the current question"),
+        BotCommand("speed", "Change next-question speed"),
+        BotCommand("stoptqex", "Stop the running exam"),
+        BotCommand("schedule", "Schedule the active or bound draft"),
+        BotCommand("listschedules", "List scheduled exams"),
+        BotCommand("cancelschedule", "Cancel a schedule"),
+    ]
+
+
+
+def build_commands_text(chat_type: str, is_admin_user: bool, is_owner_user: bool) -> str:
+    lines: List[str] = [
+        "<b>Command List</b>",
+        "All commands work with both <b>/</b> and <b>.</b> prefixes.",
+        "",
+    ]
+    if chat_type == "private":
+        lines.extend([
+            "<b>Everyone</b>",
+            "• /start — activate the bot / open practice links / receive DM results",
+            "• /start practice_TOKEN — open a generated practice exam",
+            "• /pauseq — pause your private practice after the current question",
+            "• /resumeq — resume a paused private practice",
+            "• /skipq — skip the current private question",
+            "• /stoptqex — stop your current private practice or exam",
+            "• /help or /commands — command list",
+        ])
+        if is_admin_user:
+            lines.extend([
+                "",
+                "<b>Admin / Owner (Private)</b>",
+                "• /panel — open the admin panel",
+                "• /newexam — create a new exam draft",
+                "• /drafts or /mydrafts — list drafts",
+                "• /importtext or /txtquiz — import questions from pasted text or a TXT file",
+                "• /clonequiz — create a new draft for forwarded @QuizBot quiz polls",
+                "• /cloneend — finish the current clone workflow",
+                "• /draftinfo [CODE] — show full draft details",
+                "• /settitle CODE | New Title — change draft title",
+                "• /settime CODE 30 — change default time per question",
+                "• /setneg CODE 0.25 — change negative marking",
+                "• /shuffle CODE — shuffle draft questions",
+                "• /delq CODE 3,5-7 — delete question numbers",
+                "• /section CODE 1-10 | Biology | 30 — add a timed section",
+                "• /sections CODE — list draft sections",
+                "• /clearsections CODE — remove all sections from a draft",
+                "• /creator CODE — show quiz creator info",
+                "• /csvformat — CSV import format",
+                "• /renamefile — rename a file in bot inbox and resend it",
+                "• /setthumb — set a custom preview thumbnail",
+                "• /clearthumb — remove the custom thumbnail",
+                "• /thumbstatus — show current thumbnail status",
+                "• inline query: type <code>@YourBotName quiz:CODE</code> after enabling inline mode in BotFather",
+                "• /cancel — cancel the current input flow",
+            ])
+        if is_owner_user:
+            lines.extend([
+                "",
+                "<b>Owner Only</b>",
+                "• /addadmin USER_ID — add an isolated admin",
+                "• /addadminalp USER_ID — add an all-access admin",
+                "• /rmadmin USER_ID — remove an admin",
+                "• /admins — list admin roles",
+                "• /audit — recent admin actions",
+                "• /logs — memory, uptime, and recent errors",
+                "• /broadcast [pin] — broadcast to groups and users",
+                "• /announce CHAT_ID [pin] — announce to one chat",
+                "• /restart — restart the bot process",
+            ])
+    else:
+        lines.extend([
+            "<b>Group Admin / Bot Admin</b>",
+            "• /binddraft CODE — bind a draft to this group",
+            "• /examstatus — show the current binding and exam status",
+            "• /starttqex [DRAFTCODE] — show the ready button or start a selected exam",
+            "• /pauseq — pause after the current question",
+            "• /resumeq — resume a paused exam",
+            "• /skipq — skip the current question",
+            "• /speed slow|normal|fast — apply a new speed from the next question",
+            "• /stoptqex — stop the running exam",
+            "• /schedule YYYY-MM-DD HH:MM — schedule the active or bound draft",
+            "• /listschedules — list scheduled exams for this group",
+            "• /cancelschedule SCHEDULE_ID — cancel a schedule",
+        ])
+    return "\n".join(lines)
+
+
+base.everyone_private_commands = everyone_private_commands
+base.admin_private_commands = admin_private_commands
+base.owner_private_commands = owner_private_commands
+base.group_admin_commands = group_admin_commands
+base.build_commands_text = build_commands_text
+
+
+_prev_handle_document_upload = base.handle_document_upload
+
+
+async def handle_document_upload(update: Update, context) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    chat = update.effective_chat
+    if message and user and chat and message.document and chat.type == "private" and base.user_has_staff_access(user.id):
+        state, payload = base.get_user_state(user.id)
+        lower_name = (message.document.file_name or "").lower()
+        if state == "adv_await_import_text" and lower_name.endswith((".txt", ".md", ".json")):
+            file = await message.document.get_file()
+            data = bytes(await file.download_as_bytearray())
+            clear_text = data.decode("utf-8-sig", errors="replace")
+            draft_id = str(payload.get("draft_id") or "")
+            base.clear_user_state(user.id)
+            if not draft_id:
+                await base.safe_reply(message, "No draft is selected for text import.")
+                return
+            await import_text_into_draft(message, context, draft_id, clear_text, src=f"txt:{message.document.file_name or 'upload.txt'}")
+            return
+    return await _prev_handle_document_upload(update, context)
+
+
+base.handle_document_upload = handle_document_upload
+
+
+_prev_handle_poll_import = base.handle_poll_import
+
+
+async def handle_poll_import(update: Update, context) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    chat = update.effective_chat
+    if not message or not user or not chat or not message.poll:
+        return await _prev_handle_poll_import(update, context)
+    if chat.type == "private" and base.is_bot_admin(user.id):
+        clone = get_clone_session(user.id)
+        draft_id = str(clone["draft_id"]) if clone else (base.get_active_draft_id(user.id) or "")
+        if draft_id and message.poll.type == Poll.QUIZ and message.poll.correct_option_id is not None:
+            cleaned_question = clean_forwarded_text(message.poll.question)
+            cleaned_options = [clean_forwarded_text(opt.text) for opt in message.poll.options]
+            cleaned_expl = clean_forwarded_text(message.poll.explanation or "")
+            ok, q_no = dedup_add_question_to_draft(
+                draft_id,
+                cleaned_question,
+                cleaned_options,
+                int(message.poll.correct_option_id),
+                cleaned_expl,
+                "quizbot_clone" if clone else "forwarded_quiz",
+            )
+            if ok:
+                header = f"✅ {'Clone' if clone else 'Draft'} updated. Added question Q{q_no}"
+            else:
+                header = "ℹ️ Duplicate question skipped."
+            await base.send_draft_card(context, user.id, user.id, draft_id, header=header)
+            base.audit(user.id, "clone_import" if clone else "add_quiz_question", draft_id, {"added": bool(ok), "q_no": q_no})
+            return
+    return await _prev_handle_poll_import(update, context)
+
+
+base.handle_poll_import = handle_poll_import
+
+
+_prev_handle_text = base.handle_text
+
+
+async def handle_text(update: Update, context) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    chat = update.effective_chat
+    if not message or not user or not chat or not getattr(message, "text", None):
+        return await _prev_handle_text(update, context)
+
+    state, payload = base.get_user_state(user.id)
+    cmd, args = base.extract_command(message.text, context.bot_data.get("bot_username", ""))
+    cmd = (cmd or "").lower()
+
+    if chat.type == "private" and state == "adv_await_import_text" and not cmd:
+        draft_id = str(payload.get("draft_id") or "")
+        base.clear_user_state(user.id)
+        if not draft_id:
+            await base.safe_reply(message, "No draft is selected for this text import.")
+            return
+        await import_text_into_draft(message, context, draft_id, message.text, src="pasted_text")
+        return
+
+    if chat.type == "private" and state == "adv_await_clone_source" and not cmd:
+        token = extract_clone_token(message.text)
+        if not token:
+            await base.safe_reply(message, "Send a valid @QuizBot inline text like <code>@QuizBot quiz:ABCDE</code> or a message that contains <code>quiz:ABCDE</code>.", parse_mode=ParseMode.HTML)
+            return
+        title = str(payload.get("title") or f"QuizBot Clone {token}")
+        draft_id = base.create_draft(user.id, title, 30, 0.0)
+        start_clone_session(user.id, draft_id, token, message.text)
+        base.clear_user_state(user.id)
+        await base.send_draft_card(
+            context,
+            user.id,
+            user.id,
+            draft_id,
+            header=(
+                "✅ Clone draft created.\n"
+                "Now forward the quiz polls from @QuizBot to this bot inbox. Each forwarded quiz poll will be cleaned and added automatically.\n"
+                "Use /cloneend when finished."
+            ),
+        )
+        return
+
+    if chat.type == "private" and base.user_has_staff_access(user.id):
+        if cmd in {"importtext", "txtquiz"}:
+            draft = resolve_editable_draft(user.id, args.strip())
+            if not draft:
+                await base.safe_reply(message, "Select an active draft first, or pass the draft code: /importtext DRAFTCODE")
+                return
+            base.set_user_state(user.id, "adv_await_import_text", {"draft_id": draft["id"]})
+            await base.safe_reply(
+                message,
+                "Send the MCQ text now, or upload a .txt/.md/.json file.\n\nSupported format example:\n\n1. What is the capital of France?\nA. Berlin\nB. Madrid\nC. Paris ✅\nD. Rome\nExplanation: Paris is the capital.",
+            )
+            return
+
+        if cmd == "clonequiz":
+            raw = args.strip()
+            if raw:
+                if "|" in raw:
+                    title_part, source_part = [x.strip() for x in raw.split("|", 1)]
+                else:
+                    title_part, source_part = "", raw
+                token = extract_clone_token(source_part)
+                if token:
+                    draft_id = base.create_draft(user.id, title_part or f"QuizBot Clone {token}", 30, 0.0)
+                    start_clone_session(user.id, draft_id, token, source_part)
+                    await base.send_draft_card(
+                        context,
+                        user.id,
+                        user.id,
+                        draft_id,
+                        header=(
+                            "✅ Clone draft created.\n"
+                            "Forward the quiz polls from @QuizBot to this bot inbox. Each forwarded quiz poll will be cleaned and added automatically.\n"
+                            "Use /cloneend when finished."
+                        ),
+                    )
+                    return
+            base.set_user_state(user.id, "adv_await_clone_source", {"title": ""})
+            await base.safe_reply(
+                message,
+                "Send the @QuizBot inline text or any message that contains <code>quiz:YOUR_ID</code>.\n\nNote: Telegram Bot API cannot directly fetch another bot's inline quiz payload by only reading the pasted token. This build uses a guided clone workflow: it creates a draft, then imports the forwarded quiz polls automatically.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        if cmd == "cloneend":
+            clone = get_clone_session(user.id)
+            if not clone:
+                await base.safe_reply(message, "There is no active clone session.")
+                return
+            stop_clone_session(user.id)
+            await base.send_draft_card(context, user.id, user.id, clone["draft_id"], header="✅ Clone session finished.")
+            return
+
+        if cmd == "draftinfo":
+            draft = resolve_editable_draft(user.id, args.strip())
+            if not draft:
+                await base.safe_reply(message, "Draft not found, or you do not have access.")
+                return
+            await base.safe_reply(message, format_draft_info(draft), parse_mode=ParseMode.HTML)
+            return
+
+        if cmd == "creator":
+            code = base.normalize_visual_text(args).upper()
+            if not code:
+                await base.safe_reply(message, "Usage: /creator DRAFTCODE")
+                return
+            draft = base.get_draft(code)
+            if not draft:
+                await base.safe_reply(message, "Draft not found.")
+                return
+            q_count_row = base.DBH.fetchone("SELECT COUNT(*) AS c FROM draft_questions WHERE draft_id=?", (code,))
+            role = "owner" if base.is_owner(int(draft["owner_id"])) else ("all-access admin" if getattr(base, "is_all_access_admin", lambda _x: False)(int(draft["owner_id"])) else "admin")
+            text = (
+                f"<b>Creator Info</b>\n"
+                f"Draft: <b>{base.html_escape(draft['title'])}</b>\n"
+                f"Code: <code>{draft['id']}</code>\n"
+                f"Creator ID: <code>{draft['owner_id']}</code>\n"
+                f"Role: <b>{role}</b>\n"
+                f"Questions: <b>{int(q_count_row['c'] if q_count_row else 0)}</b>\n"
+                f"Created: <b>{base.fmt_dt(draft['created_at'])}</b>\n"
+                f"Updated: <b>{base.fmt_dt(draft['updated_at'])}</b>"
+            )
+            await base.safe_reply(message, text, parse_mode=ParseMode.HTML)
+            return
+
+        if cmd == "settitle":
+            if "|" not in args:
+                await base.safe_reply(message, "Usage: /settitle DRAFTCODE | New Title")
+                return
+            code_part, title_part = [x.strip() for x in args.split("|", 1)]
+            draft = resolve_editable_draft(user.id, code_part)
+            if not draft or not title_part:
+                await base.safe_reply(message, "Draft not found or title is empty.")
+                return
+            base.DBH.execute("UPDATE drafts SET title=?, updated_at=? WHERE id=?", (base.normalize_visual_text(title_part), base.now_ts(), draft["id"]))
+            await base.send_draft_card(context, user.id, user.id, draft["id"], header="✅ Draft title updated.")
+            return
+
+        if cmd == "settime":
+            parts = args.split()
+            if len(parts) < 2 or not parts[-1].isdigit():
+                await base.safe_reply(message, "Usage: /settime DRAFTCODE 30")
+                return
+            draft = resolve_editable_draft(user.id, " ".join(parts[:-1]))
+            if not draft:
+                await base.safe_reply(message, "Draft not found, or you do not have access.")
+                return
+            secs = max(5, int(parts[-1]))
+            base.DBH.execute("UPDATE drafts SET question_time=?, updated_at=? WHERE id=?", (secs, base.now_ts(), draft["id"]))
+            await base.send_draft_card(context, user.id, user.id, draft["id"], header=f"✅ Default time updated to {secs} sec.")
+            return
+
+        if cmd == "setneg":
+            parts = args.split()
+            if len(parts) < 2:
+                await base.safe_reply(message, "Usage: /setneg DRAFTCODE 0.25")
+                return
+            try:
+                neg = float(parts[-1])
+            except ValueError:
+                await base.safe_reply(message, "Send a valid decimal value. Example: 0.25")
+                return
+            draft = resolve_editable_draft(user.id, " ".join(parts[:-1]))
+            if not draft:
+                await base.safe_reply(message, "Draft not found, or you do not have access.")
+                return
+            base.DBH.execute("UPDATE drafts SET negative_mark=?, updated_at=? WHERE id=?", (neg, base.now_ts(), draft["id"]))
+            await base.send_draft_card(context, user.id, user.id, draft["id"], header=f"✅ Negative mark updated to {neg}.")
+            return
+
+        if cmd == "shuffle":
+            draft = resolve_editable_draft(user.id, args.strip())
+            if not draft:
+                await base.safe_reply(message, "Draft not found, or you do not have access.")
+                return
+            shuffle_draft_questions(draft["id"])
+            await base.send_draft_card(context, user.id, user.id, draft["id"], header="✅ Draft questions shuffled.")
+            return
+
+        if cmd == "delq":
+            parts = args.split(maxsplit=1)
+            if len(parts) != 2:
+                await base.safe_reply(message, "Usage: /delq DRAFTCOD
