@@ -1,256 +1,166 @@
-import logging, os, uuid, asyncio
-from telegram import *
-from telegram.ext import *
+import logging
+import random
+import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Poll
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = "YOUR_BOT_TOKEN_HERE"   # ← YAHAN APNA TOKEN PASTE KAR
 
-TITLE, DESC, QUESTION, TIMER, NEGATIVE = range(5)
+# Global storage (simple in-memory) - restart pe reset ho jayega
+quizzes = {}           # quiz_id: {title, desc, questions}
+user_creating = {}     # user_id: current quiz data
+group_ready = {}       # group_id: list of ready users
 
-# ───── START ─────
+# Quiz structure: questions = [{"question": str, "options": list, "correct": int (0-based index)}]
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [[KeyboardButton("➕ Create Quiz")]]
     await update.message.reply_text(
-        "✨ Welcome to Premium Quiz Bot\n\nTap below to start 👇",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+        "🎉 **Welcome to Custom Quiz Bot!** 🎉\n\n"
+        "Commands:\n"
+        "/create - Naya quiz banao\n"
+        "/myquizzes - Apne quizzes dekho\n"
+        "Group mein bhi use kar sakte ho!"
     )
 
-# ───── CREATE FLOW ─────
-async def create(update, context):
-    await update.message.reply_text("📌 Send Quiz Title")
-    return TITLE
+# ================== CREATE QUIZ FLOW ==================
+async def create_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_creating[user_id] = {"title": None, "desc": None, "questions": []}
+    
+    await update.message.reply_text("📝 Quiz ka **Title** daalo:")
 
-async def title(update, context):
-    context.user_data['title'] = update.message.text
-    await update.message.reply_text("📝 Send Description or /skip")
-    return DESC
+async def handle_creation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in user_creating:
+        return
+    
+    data = user_creating[user_id]
+    text = update.message.text
+    
+    if data["title"] is None:
+        data["title"] = text
+        await update.message.reply_text(f"✅ Title saved: {text}\n\nAb **Description** daalo (ya skip ke liye /skip):")
+    
+    elif data["desc"] is None:
+        if text.lower() != "/skip":
+            data["desc"] = text
+        else:
+            data["desc"] = "No description"
+        await show_creation_menu(update, context)
 
-async def desc(update, context):
-    context.user_data['desc'] = update.message.text
-    return await ask_q(update, context)
-
-async def skip(update, context):
-    context.user_data['desc'] = ""
-    return await ask_q(update, context)
-
-async def ask_q(update, context):
-    context.user_data['questions'] = []
-    kb = [[KeyboardButton("➕ Add Question", request_poll=KeyboardButtonPollType(type="quiz"))]]
-    await update.message.reply_text(
-        "➕ Add your questions",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    )
-    return QUESTION
-
-async def save_q(update, context):
-    poll = update.message.poll
-
-    context.user_data['questions'].append({
-        "q": poll.question,
-        "opts": [o.text for o in poll.options],
-        "ans": poll.correct_option_id
-    })
-
-    kb = [
-        [KeyboardButton("➕ Next", request_poll=KeyboardButtonPollType(type="quiz"))],
-        [KeyboardButton("/done")]
+async def show_creation_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Question", callback_data="add_q")],
+        [InlineKeyboardButton("✅ Done", callback_data="done_quiz")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_quiz")]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Quiz ready hai! Ab kya karna hai?", reply_markup=reply_markup)
 
-    await update.message.reply_text(
-        f"✅ Question Added ({len(context.user_data['questions'])})",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    )
-    return QUESTION
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    data = query.data
 
-# ───── SETTINGS ─────
-async def done(update, context):
-    kb = [["10","20","30","45","60"]]
-    await update.message.reply_text("⏱ Select Timer", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
-    return TIMER
+    if data == "add_q":
+        await query.edit_message_text("❓ Question text daalo:")
+        # Next message will be handled as question
 
-async def timer(update, context):
-    context.user_data['timer'] = int(update.message.text)
-    kb = [["0","0.5","1"]]
-    await update.message.reply_text("➖ Negative Marking?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
-    return NEGATIVE
+    elif data == "done_quiz":
+        if user_id in user_creating and user_creating[user_id]["questions"]:
+            quiz_id = f"quiz_{user_id}_{len(quizzes)}"
+            quizzes[quiz_id] = user_creating[user_id]
+            await query.edit_message_text(f"✅ Quiz created successfully!\nTitle: {quizzes[quiz_id]['title']}\nUse /startquiz {quiz_id} to start it.")
+            del user_creating[user_id]
+        else:
+            await query.edit_message_text("No questions added!")
 
-async def negative(update, context):
-    context.user_data['neg'] = float(update.message.text)
+    elif data == "cancel_quiz":
+        if user_id in user_creating:
+            del user_creating[user_id]
+        await query.edit_message_text("❌ Quiz creation cancelled.")
 
-    quiz_id = str(uuid.uuid4())[:8]
-    context.bot_data.setdefault("quizzes", {})[quiz_id] = context.user_data.copy()
-
-    btn = [[InlineKeyboardButton("🚀 Start Quiz in Group", callback_data=f"start_{quiz_id}")]]
-    await update.message.reply_text(
-        f"🎉 Quiz Created Successfully!\n\n🆔 ID: `{quiz_id}`",
-        reply_markup=InlineKeyboardMarkup(btn),
-        parse_mode="Markdown"
-    )
-
-    context.user_data.clear()
-    return ConversationHandler.END
-
-# ───── START IN GROUP ─────
-async def start_btn(update, context):
-    q = update.callback_query
-    await q.answer()
-
-    quiz_id = q.data.split("_")[1]
-    quiz = context.bot_data["quizzes"].get(quiz_id)
-
-    if not quiz:
-        return await q.edit_message_text("❌ Quiz not found")
-
-    context.chat_data['waiting'] = {
-        "quiz": quiz,
-        "players": {}
-    }
-
-    btn = [[InlineKeyboardButton("✅ Ready", callback_data="ready")]]
-
-    await q.message.reply_text(
-        f"🎯 **{quiz['title']}**\n\n"
-        f"📝 {len(quiz['questions'])} Questions\n"
-        f"⏱ {quiz['timer']} sec each\n\n"
-        f"👥 Players: 0/2",
-        reply_markup=InlineKeyboardMarkup(btn),
-        parse_mode="Markdown"
-    )
-
-# ───── READY SYSTEM ─────
-async def ready_btn(update, context):
-    q = update.callback_query
-    await q.answer()
-
-    data = context.chat_data.get('waiting')
-    if not data:
+# Start Quiz in Group
+async def start_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /startquiz <quiz_id>")
+        return
+    
+    quiz_id = context.args[0]
+    if quiz_id not in quizzes:
+        await update.message.reply_text("Invalid quiz ID!")
         return
 
-    user = q.from_user
-    data['players'][user.id] = user.first_name
-
-    count = len(data['players'])
-
-    names = "\n".join([f"• {n}" for n in data['players'].values()])
-
-    await q.edit_message_text(
-        f"🎯 Quiz Ready\n\n👥 Players ({count}/2):\n{names}",
-        parse_mode="Markdown"
+    chat_id = update.effective_chat.id
+    group_ready[chat_id] = []
+    
+    keyboard = [[InlineKeyboardButton("✅ I'm Ready!", callback_data=f"ready_{quiz_id}")]]
+    await update.message.reply_text(
+        f"📢 **{quizzes[quiz_id]['title']}**\n{quizzes[quiz_id]['desc']}\n\n"
+        "Ready hone ke liye button dabaao!\n(At least 2 players needed)",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-    if count >= 2:
-        await q.message.reply_text("⏳ Starting in 3 seconds...")
+async def ready_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    chat_id = query.message.chat_id
+    user = query.from_user
+    quiz_id = query.data.split("_")[1]
+    
+    if chat_id not in group_ready:
+        group_ready[chat_id] = []
+    
+    if user.id not in group_ready[chat_id]:
+        group_ready[chat_id].append(user.id)
+        await query.message.reply_text(f"✅ {user.first_name} is ready! ({len(group_ready[chat_id])} players)")
+    
+    if len(group_ready[chat_id]) >= 2:
+        await query.message.reply_text("⏳ Starting in 3 seconds...")
         await asyncio.sleep(3)
+        await start_quiz_questions(chat_id, quiz_id, context)
 
-        context.chat_data['quiz'] = {
-            "quiz": data['quiz'],
-            "index": 0,
-            "score": {},
-            "players": data['players']
-        }
+async def start_quiz_questions(chat_id, quiz_id, context):
+    quiz = quizzes[quiz_id]
+    questions = quiz["questions"][:]
+    random.shuffle(questions)
+    
+    await context.bot.send_message(chat_id, f"🚀 **Quiz Starting Now!** 🚀\n{quiz['title']}")
+    
+    for i, q in enumerate(questions, 1):
+        await context.bot.send_poll(
+            chat_id=chat_id,
+            question=f"Q{i}: {q['question']}",
+            options=q["options"],
+            type=Poll.QUIZ,
+            correct_option_id=q["correct"],
+            open_period=20,   # 20 seconds timer
+            is_anonymous=False,
+            explanation="Correct answer highlighted! 🔥"
+        )
+        await asyncio.sleep(25)  # Wait for poll to close + little gap
+    
+    await context.bot.send_message(chat_id, "🏁 Quiz Finished! Check your scores in the polls.\nLeaderboard coming soon...")
 
-        await q.message.reply_text("🚀 Quiz Started!")
-        await send_q(context, q.message.chat.id)
+# Basic Leaderboard (poll se manual dekh sakte ho abhi)
+async def show_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Leaderboard feature (full score tracking) next update mein add kar dunga!")
 
-# ───── SEND QUESTIONS ─────
-async def send_q(context, chat_id):
-    data = context.chat_data.get('quiz')
-    if not data:
-        return
+# Main
+if __name__ == '__main__':
+    application = Application.builder().token(TOKEN).build()
 
-    quiz = data['quiz']
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("create", create_quiz))
+    application.add_handler(CommandHandler("startquiz", start_quiz_command))
 
-    if data['index'] >= len(quiz['questions']):
-        await show_result(context, chat_id)
-        return
+    application.add_handler(MessageHandler(filters.TEXT & \~filters.COMMAND, handle_creation))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(CallbackQueryHandler(ready_button, pattern="^ready_"))
 
-    q = quiz['questions'][data['index']]
-
-    await context.bot.send_poll(
-        chat_id,
-        q['q'],
-        q['opts'],
-        type=Poll.QUIZ,
-        correct_option_id=q['ans'],
-        is_anonymous=False,
-        open_period=quiz['timer']
-    )
-
-    data['index'] += 1
-
-    await asyncio.sleep(quiz['timer'] + 2)
-    await send_q(context, chat_id)
-
-# ───── ANSWERS ─────
-async def answer(update, context):
-    ans = update.poll_answer
-    user_id = ans.user.id
-
-    data = context.chat_data.get('quiz')
-    if not data:
-        return
-
-    quiz = data['quiz']
-    q = quiz['questions'][data['index']-1]
-
-    if ans.option_ids and ans.option_ids[0] == q['ans']:
-        data['score'][user_id] = data['score'].get(user_id, 0) + 1
-    else:
-        data['score'][user_id] = data['score'].get(user_id, 0) - quiz['neg']
-
-# ───── RESULT ─────
-async def show_result(context, chat_id):
-    data = context.chat_data.get('quiz')
-
-    scores = data['score']
-    players = data['players']
-
-    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-
-    text = "🏆 **Leaderboard**\n\n"
-
-    for i, (uid, sc) in enumerate(sorted_scores, 1):
-        name = players.get(uid, "User")
-        text += f"{i}. {name} — {sc}\n"
-
-    await context.bot.send_message(chat_id, text, parse_mode="Markdown")
-
-# ───── MAIN ─────
-def main():
-    app = Application.builder().token(TOKEN).build()
-
-    conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("create", create),
-            MessageHandler(filters.Regex("Create Quiz"), create)
-        ],
-        states={
-            TITLE:[MessageHandler(filters.TEXT & ~filters.COMMAND, title)],
-            DESC:[
-                MessageHandler(filters.TEXT & ~filters.COMMAND, desc),
-                CommandHandler("skip", skip)
-            ],
-            QUESTION:[
-                MessageHandler(filters.POLL, save_q),
-                CommandHandler("done", done)
-            ],
-            TIMER:[MessageHandler(filters.TEXT, timer)],
-            NEGATIVE:[MessageHandler(filters.TEXT, negative)]
-        },
-        fallbacks=[]
-    )
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(conv)
-
-    app.add_handler(CallbackQueryHandler(start_btn, pattern="^start_"))
-    app.add_handler(CallbackQueryHandler(ready_btn, pattern="^ready$"))
-
-    app.add_handler(PollAnswerHandler(answer))
-
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    print("🚀 Advanced Quiz Creator Bot running...")
+    application.run_polling()
