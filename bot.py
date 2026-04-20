@@ -2,7 +2,7 @@ import logging, os, uuid, asyncio, random
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
     KeyboardButton, KeyboardButtonPollType,
-    ReplyKeyboardMarkup
+    ReplyKeyboardMarkup, Poll
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -11,8 +11,6 @@ from telegram.ext import (
 )
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 TOKEN = os.getenv("BOT_TOKEN")
 
 TITLE, DESC, QUESTION, TIMER, SHUFFLE, NEGATIVE = range(6)
@@ -37,72 +35,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         btn = [[InlineKeyboardButton("✅ Ready (0/2)", callback_data=f"ready_{quiz_id}")]]
 
         await update.message.reply_text(
-            f"🎲 Get ready for quiz '{quiz['title']}'\n\n"
-            f"🖊 {len(quiz['questions'])} questions\n"
-            f"⏱ {quiz['timer']} sec per question\n\n"
-            f"🏁 Quiz will start when 2 players are ready\n"
-            f"Ready: 0",
-            reply_markup=InlineKeyboardMarkup(btn)
-        )
-        return
-
-    kb = [[KeyboardButton("➕ Create Quiz")]]
-    await update.message.reply_text(
-        "🤖 Quiz Bot Ready",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    )
-
-# ───── CREATE FLOW ─────
-async def create(update, context):
-    await update.message.reply_text("📌 Send Title")
-    return TITLE
-
-async def title(update, context):
-    context.user_data['title'] = update.message.text
-    await update.message.reply_text("📝 Send Description or /skip")
-    return DESC
-
-async def desc(update, context):
-    context.user_data['desc'] = update.message.text
-import logging, os, uuid, asyncio, random
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    KeyboardButton, KeyboardButtonPollType,
-    ReplyKeyboardMarkup, Poll
-)
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    ConversationHandler, CallbackQueryHandler,
-    PollAnswerHandler, ContextTypes, filters
-)
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-TOKEN = os.getenv("BOT_TOKEN")
-
-TITLE, DESC, QUESTION, TIMER, SHUFFLE, NEGATIVE = range(6)
-
-# ───── START ─────
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-
-    if args:
-        quiz_id = args[0]
-        quiz = context.bot_data.get("quizzes", {}).get(quiz_id)
-
-        if not quiz:
-            return await update.message.reply_text("❌ Quiz not found")
-
-        context.chat_data['waiting'] = {
-            "quiz": quiz,
-            "players": set()
-        }
-
-        btn = [[InlineKeyboardButton("✅ Ready (0/2)", callback_data=f"ready_{quiz_id}")]]
-
-        await update.message.reply_text(
-            f"🎲 Quiz: {quiz['title']}\n"
+            f"🎲 {quiz['title']}\n"
             f"🖊 {len(quiz['questions'])} Questions\n"
             f"⏱ {quiz['timer']} sec\n\n"
             f"Press Ready 👇",
@@ -110,20 +43,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # PRIVATE MENU
     kb = [[KeyboardButton("➕ Create Quiz")]]
     await update.message.reply_text(
-        "🤖 Quiz Bot Ready",
+        "🤖 Welcome to Quiz Bot",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
-# ───── CREATE FLOW ─────
+# ───── CREATE (PRIVATE ONLY) ─────
 async def create(update, context):
+    if update.effective_chat.type != "private":
+        return await update.message.reply_text("❌ Create quiz in DM only")
+
     await update.message.reply_text("📌 Send Title")
     return TITLE
 
 async def title(update, context):
     context.user_data['title'] = update.message.text
-    await update.message.reply_text("📝 Send Description or /skip")
+    await update.message.reply_text("📝 Description or /skip")
     return DESC
 
 async def desc(update, context):
@@ -136,7 +73,9 @@ async def skip(update, context):
 
 async def ask_q(update, context):
     context.user_data['questions'] = []
+
     kb = [[KeyboardButton("➕ Add Question", request_poll=KeyboardButtonPollType(type="quiz"))]]
+
     await update.message.reply_text("Add Question", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return QUESTION
 
@@ -165,20 +104,17 @@ async def done(update, context):
     if not context.user_data.get('questions'):
         return await update.message.reply_text("❌ Add at least 1 question")
 
-    kb = [["10","20","30","45","60"]]
-    await update.message.reply_text("⏱ Timer?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    await update.message.reply_text("⏱ Timer? (10/20/30)")
     return TIMER
 
 async def timer(update, context):
     context.user_data['timer'] = int(update.message.text)
-    kb = [["Shuffle","No Shuffle"]]
-    await update.message.reply_text("🔀 Shuffle?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    await update.message.reply_text("Shuffle? (yes/no)")
     return SHUFFLE
 
 async def shuffle(update, context):
-    context.user_data['shuffle'] = update.message.text == "Shuffle"
-    kb = [["0","0.5","1"]]
-    await update.message.reply_text("➖ Negative?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    context.user_data['shuffle'] = update.message.text.lower() == "yes"
+    await update.message.reply_text("Negative? (0 / 0.5 / 1)")
     return NEGATIVE
 
 # ───── SAVE QUIZ ─────
@@ -190,11 +126,11 @@ async def negative(update, context):
 
     keyboard = [
         [InlineKeyboardButton("▶️ Start Here", callback_data=f"start_{quiz_id}")],
-        [InlineKeyboardButton("📢 Start in Group", url=f"https://t.me/{context.bot.username}?startgroup={quiz_id}")]
+        [InlineKeyboardButton("📢 Play in Group", url=f"https://t.me/{context.bot.username}?startgroup={quiz_id}")]
     ]
 
     await update.message.reply_text(
-        f"✅ Quiz Saved\n🆔 {quiz_id}",
+        f"✅ Quiz Saved\nID: {quiz_id}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -206,34 +142,34 @@ async def ready_btn(update, context):
     q = update.callback_query
     await q.answer()
 
-    quiz_id = q.data.split("_")[1]
     data = context.chat_data.get("waiting")
-
     if not data:
         return
 
-    players = data["players"]
-    players.add(q.from_user.id)
+    data["players"].add(q.from_user.id)
+    count = len(data["players"])
 
-    count = len(players)
+    btn = [[InlineKeyboardButton(f"✅ Ready ({count}/2)", callback_data=q.data)]]
 
-    btn = [[InlineKeyboardButton(f"✅ Ready ({count}/2)", callback_data=f"ready_{quiz_id}")]]
-    await q.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
+    try:
+        await q.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(btn))
+    except:
+        pass
 
     if count >= 2:
-        await q.message.reply_text("⏳ Starting...")
-        await asyncio.sleep(2)
+        chat_id = q.message.chat.id
 
         context.chat_data['quiz'] = {
             "quiz": data["quiz"],
             "index": 0,
             "score": {},
-            "players": players.copy()
+            "players": data["players"]
         }
 
         context.chat_data.pop("waiting", None)
 
-        await send_q(context, q.message.chat.id)
+        await context.bot.send_message(chat_id, "🚀 Quiz Started!")
+        asyncio.create_task(send_q(context, chat_id))
 
 # ───── DIRECT START ─────
 async def start_btn(update, context):
@@ -241,10 +177,7 @@ async def start_btn(update, context):
     await q.answer()
 
     quiz_id = q.data.split("_")[1]
-    quiz = context.bot_data.get("quizzes", {}).get(quiz_id)
-
-    if not quiz:
-        return await q.edit_message_text("❌ Not found")
+    quiz = context.bot_data["quizzes"][quiz_id]
 
     context.chat_data['quiz'] = {
         "quiz": quiz,
@@ -253,62 +186,65 @@ async def start_btn(update, context):
         "players": set()
     }
 
-    await send_q(context, q.message.chat.id)
+    asyncio.create_task(send_q(context, q.message.chat.id))
 
 # ───── SEND QUESTION ─────
 async def send_q(context, chat_id):
-    data = context.chat_data.get('quiz')
-    if not data:
-        return
+    try:
+        data = context.chat_data.get('quiz')
+        if not data:
+            return
 
-    quiz = data['quiz']
+        quiz = data['quiz']
 
-    if data['index'] >= len(quiz['questions']):
-        text = "🏁 Leaderboard:\n\n"
+        if data['index'] >= len(quiz['questions']):
+            text = "🏁 Leaderboard:\n\n"
 
-        for i, (uid, sc) in enumerate(sorted(data['score'].items(), key=lambda x: x[1], reverse=True), 1):
-            try:
-                user = await context.bot.get_chat(uid)
-                name = user.first_name
-            except:
-                name = str(uid)
+            for uid, sc in sorted(data['score'].items(), key=lambda x: x[1], reverse=True):
+                try:
+                    user = await context.bot.get_chat(uid)
+                    name = user.first_name
+                except:
+                    name = str(uid)
 
-            text += f"{i}. {name} → {round(sc,2)}\n"
+                text += f"{name} → {round(sc,2)}\n"
 
-        await context.bot.send_message(chat_id, text)
-        context.chat_data.pop("quiz", None)
-        return
+            await context.bot.send_message(chat_id, text)
+            context.chat_data.pop("quiz", None)
+            return
 
-    q = quiz['questions'][data['index']]
+        q = quiz['questions'][data['index']]
 
-    opts = list(q['opts'])
-    correct = q['ans']
+        opts = list(q['opts'])
+        correct = q['ans']
 
-    if quiz['shuffle']:
-        indexed = list(enumerate(opts))
-        random.shuffle(indexed)
+        if quiz['shuffle']:
+            indexed = list(enumerate(opts))
+            random.shuffle(indexed)
+            opts = [x[1] for x in indexed]
 
-        opts = [x[1] for x in indexed]
+            for i, x in enumerate(indexed):
+                if x[0] == q['ans']:
+                    correct = i
+                    break
 
-        for i, x in enumerate(indexed):
-            if x[0] == q['ans']:
-                correct = i
-                break
+        await context.bot.send_poll(
+            chat_id,
+            q['q'],
+            opts,
+            type=Poll.QUIZ,
+            correct_option_id=correct,
+            open_period=quiz['timer'],
+            is_anonymous=False
+        )
 
-    await context.bot.send_poll(
-        chat_id,
-        q['q'],
-        opts,
-        type=Poll.QUIZ,
-        correct_option_id=correct,
-        open_period=quiz['timer'],
-        is_anonymous=False
-    )
+        data['index'] += 1
 
-    data['index'] += 1
+        await asyncio.sleep(quiz['timer'] + 1)
+        await send_q(context, chat_id)
 
-    await asyncio.sleep(quiz['timer'] + 1)
-    await send_q(context, chat_id)
+    except Exception as e:
+        print("ERROR:", e)
 
 # ───── ANSWER ─────
 async def answer(update, context):
@@ -319,7 +255,7 @@ async def answer(update, context):
     if not data:
         return
 
-    if data.get("players") and user not in data["players"]:
+    if data["players"] and user not in data["players"]:
         return
 
     quiz = data['quiz']
@@ -336,8 +272,8 @@ def main():
 
     conv = ConversationHandler(
         entry_points=[
-            CommandHandler("create", create),
-            MessageHandler(filters.Regex("➕ Create Quiz"), create)
+            CommandHandler("create", create, filters=filters.ChatType.PRIVATE),
+            MessageHandler(filters.Regex("➕ Create Quiz") & filters.ChatType.PRIVATE, create)
         ],
         states={
             TITLE:[MessageHandler(filters.TEXT & ~filters.COMMAND, title)],
