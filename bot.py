@@ -7,19 +7,19 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-TITLE, DESC, QUESTION, TIMER, SHUFFLE, NEGATIVE = range(6)
+TITLE, DESC, QUESTION, TIMER, NEGATIVE = range(5)
 
 # ───── START ─────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[KeyboardButton("➕ Create Quiz")]]
     await update.message.reply_text(
-        "🤖 Quiz Bot Ready",
+        "✨ Welcome to Premium Quiz Bot\n\nTap below to start 👇",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
-# ───── CREATE ─────
+# ───── CREATE FLOW ─────
 async def create(update, context):
-    await update.message.reply_text("📌 Send Title")
+    await update.message.reply_text("📌 Send Quiz Title")
     return TITLE
 
 async def title(update, context):
@@ -36,9 +36,12 @@ async def skip(update, context):
     return await ask_q(update, context)
 
 async def ask_q(update, context):
-    kb = [[KeyboardButton("➕ Add Question", request_poll=KeyboardButtonPollType(type="quiz"))]]
     context.user_data['questions'] = []
-    await update.message.reply_text("Add Question", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    kb = [[KeyboardButton("➕ Add Question", request_poll=KeyboardButtonPollType(type="quiz"))]]
+    await update.message.reply_text(
+        "➕ Add your questions",
+        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    )
     return QUESTION
 
 async def save_q(update, context):
@@ -56,7 +59,7 @@ async def save_q(update, context):
     ]
 
     await update.message.reply_text(
-        f"Saved {len(context.user_data['questions'])}",
+        f"✅ Question Added ({len(context.user_data['questions'])})",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
     return QUESTION
@@ -64,15 +67,13 @@ async def save_q(update, context):
 # ───── SETTINGS ─────
 async def done(update, context):
     kb = [["10","20","30","45","60"]]
-    await update.message.reply_text("⏱ Timer?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    await update.message.reply_text("⏱ Select Timer", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return TIMER
 
 async def timer(update, context):
     context.user_data['timer'] = int(update.message.text)
-    return SHUFFLE
-
-async def shuffle(update, context):
-    context.user_data['shuffle'] = update.message.text == "Shuffle"
+    kb = [["0","0.5","1"]]
+    await update.message.reply_text("➖ Negative Marking?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return NEGATIVE
 
 async def negative(update, context):
@@ -83,14 +84,15 @@ async def negative(update, context):
 
     btn = [[InlineKeyboardButton("🚀 Start Quiz in Group", callback_data=f"start_{quiz_id}")]]
     await update.message.reply_text(
-        f"✅ Quiz Saved\nID: {quiz_id}",
-        reply_markup=InlineKeyboardMarkup(btn)
+        f"🎉 Quiz Created Successfully!\n\n🆔 ID: `{quiz_id}`",
+        reply_markup=InlineKeyboardMarkup(btn),
+        parse_mode="Markdown"
     )
 
     context.user_data.clear()
     return ConversationHandler.END
 
-# ───── START BUTTON (GROUP) ─────
+# ───── START IN GROUP ─────
 async def start_btn(update, context):
     q = update.callback_query
     await q.answer()
@@ -103,20 +105,21 @@ async def start_btn(update, context):
 
     context.chat_data['waiting'] = {
         "quiz": quiz,
-        "ready": set()
+        "players": {}
     }
 
-    btn = [[InlineKeyboardButton("✅ I am Ready", callback_data="ready")]]
+    btn = [[InlineKeyboardButton("✅ Ready", callback_data="ready")]]
 
     await q.message.reply_text(
-        f"🎯 Get ready for quiz '{quiz['title']}'\n"
-        f"📝 {len(quiz['questions'])} questions\n"
-        f"⏱ {quiz['timer']} sec per question\n\n"
-        f"Ready: 0/2",
-        reply_markup=InlineKeyboardMarkup(btn)
+        f"🎯 **{quiz['title']}**\n\n"
+        f"📝 {len(quiz['questions'])} Questions\n"
+        f"⏱ {quiz['timer']} sec each\n\n"
+        f"👥 Players: 0/2",
+        reply_markup=InlineKeyboardMarkup(btn),
+        parse_mode="Markdown"
     )
 
-# ───── READY ─────
+# ───── READY SYSTEM ─────
 async def ready_btn(update, context):
     q = update.callback_query
     await q.answer()
@@ -125,27 +128,33 @@ async def ready_btn(update, context):
     if not data:
         return
 
-    data['ready'].add(q.from_user.id)
-    count = len(data['ready'])
+    user = q.from_user
+    data['players'][user.id] = user.first_name
+
+    count = len(data['players'])
+
+    names = "\n".join([f"• {n}" for n in data['players'].values()])
 
     await q.edit_message_text(
-        f"🎯 Quiz: {data['quiz']['title']}\nReady: {count}/2"
+        f"🎯 Quiz Ready\n\n👥 Players ({count}/2):\n{names}",
+        parse_mode="Markdown"
     )
 
     if count >= 2:
-        await q.message.reply_text("⏳ Starting in 3 sec...")
+        await q.message.reply_text("⏳ Starting in 3 seconds...")
         await asyncio.sleep(3)
 
         context.chat_data['quiz'] = {
             "quiz": data['quiz'],
             "index": 0,
-            "score": {}
+            "score": {},
+            "players": data['players']
         }
 
         await q.message.reply_text("🚀 Quiz Started!")
         await send_q(context, q.message.chat.id)
 
-# ───── SEND QUESTION (FIXED) ─────
+# ───── SEND QUESTIONS ─────
 async def send_q(context, chat_id):
     data = context.chat_data.get('quiz')
     if not data:
@@ -154,39 +163,30 @@ async def send_q(context, chat_id):
     quiz = data['quiz']
 
     if data['index'] >= len(quiz['questions']):
-        text = "🏁 Leaderboard:\n"
-        for uid, sc in data['score'].items():
-            text += f"{uid} → {sc}\n"
-
-        await context.bot.send_message(chat_id, text)
+        await show_result(context, chat_id)
         return
 
     q = quiz['questions'][data['index']]
 
-    try:
-        await context.bot.send_poll(
-            chat_id,
-            q['q'],
-            q['opts'],
-            type=Poll.QUIZ,
-            correct_option_id=q['ans'],
-            is_anonymous=False,
-            open_period=quiz['timer']
-        )
-    except Exception as e:
-        print("POLL ERROR:", e)
-        await context.bot.send_message(chat_id, "❌ Poll error")
-        return
+    await context.bot.send_poll(
+        chat_id,
+        q['q'],
+        q['opts'],
+        type=Poll.QUIZ,
+        correct_option_id=q['ans'],
+        is_anonymous=False,
+        open_period=quiz['timer']
+    )
 
     data['index'] += 1
 
     await asyncio.sleep(quiz['timer'] + 2)
     await send_q(context, chat_id)
 
-# ───── ANSWER ─────
+# ───── ANSWERS ─────
 async def answer(update, context):
     ans = update.poll_answer
-    user = ans.user.id
+    user_id = ans.user.id
 
     data = context.chat_data.get('quiz')
     if not data:
@@ -196,9 +196,26 @@ async def answer(update, context):
     q = quiz['questions'][data['index']-1]
 
     if ans.option_ids and ans.option_ids[0] == q['ans']:
-        data['score'][user] = data['score'].get(user, 0) + 1
+        data['score'][user_id] = data['score'].get(user_id, 0) + 1
     else:
-        data['score'][user] = data['score'].get(user, 0) - quiz['neg']
+        data['score'][user_id] = data['score'].get(user_id, 0) - quiz['neg']
+
+# ───── RESULT ─────
+async def show_result(context, chat_id):
+    data = context.chat_data.get('quiz')
+
+    scores = data['score']
+    players = data['players']
+
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    text = "🏆 **Leaderboard**\n\n"
+
+    for i, (uid, sc) in enumerate(sorted_scores, 1):
+        name = players.get(uid, "User")
+        text += f"{i}. {name} — {sc}\n"
+
+    await context.bot.send_message(chat_id, text, parse_mode="Markdown")
 
 # ───── MAIN ─────
 def main():
@@ -220,7 +237,6 @@ def main():
                 CommandHandler("done", done)
             ],
             TIMER:[MessageHandler(filters.TEXT, timer)],
-            SHUFFLE:[MessageHandler(filters.TEXT, shuffle)],
             NEGATIVE:[MessageHandler(filters.TEXT, negative)]
         },
         fallbacks=[]
