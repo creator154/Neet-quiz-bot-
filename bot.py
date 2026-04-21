@@ -11,6 +11,29 @@ TITLE, DESC, QUESTION, TIMER, SHUFFLE, NEGATIVE = range(6)
 
 # ───────── START ─────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+
+    # GROUP START
+    if args:
+        quiz_id = args[0]
+        quiz = context.bot_data.get("quizzes", {}).get(quiz_id)
+
+        if not quiz:
+            return await update.message.reply_text("❌ Quiz not found")
+
+        context.chat_data['waiting'] = {
+            "quiz": quiz,
+            "players": set()
+        }
+
+        btn = [[InlineKeyboardButton("✅ Ready", callback_data="ready")]]
+
+        await update.message.reply_text(
+            f"🎯 {quiz['title']}\n\nPress Ready (min 2 players)",
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
+        return
+
     kb = [[KeyboardButton("➕ Create Quiz")]]
     await update.message.reply_text(
         "🤖 Quiz Bot Ready",
@@ -41,7 +64,7 @@ async def ask_q(update, context):
     kb = [[KeyboardButton("➕ Add Question", request_poll=KeyboardButtonPollType(type="quiz"))]]
 
     await update.message.reply_text(
-        "➕ Add Questions using button",
+        "➕ Add Questions",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
     return QUESTION
@@ -77,7 +100,7 @@ async def done(update, context):
         return ConversationHandler.END
 
     kb = [["10","20","30","45","60"]]
-    await update.message.reply_text("⏱ Select Timer", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    await update.message.reply_text("⏱ Timer?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return TIMER
 
 async def timer(update, context):
@@ -91,7 +114,7 @@ async def shuffle(update, context):
     context.user_data['shuffle'] = update.message.text == "Shuffle"
 
     kb = [["0","0.5","1"]]
-    await update.message.reply_text("➖ Negative Marking?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    await update.message.reply_text("➖ Negative?", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return NEGATIVE
 
 async def negative(update, context):
@@ -100,27 +123,49 @@ async def negative(update, context):
     quiz_id = str(uuid.uuid4())[:8]
     context.bot_data.setdefault("quizzes", {})[quiz_id] = context.user_data.copy()
 
-    btn = [[
-    InlineKeyboardButton(
-        "🚀 Start Quiz in Group",
-        url=f"https://t.me/{context.bot.username}?startgroup={quiz_id}"
-    )
-]]
+    btn = [
+        [InlineKeyboardButton("▶️ Start Here", callback_data=f"play_{quiz_id}")],
+        [InlineKeyboardButton(
+            "🚀 Start in Group",
+            url=f"https://t.me/{context.bot.username}?startgroup={quiz_id}"
+        )]
+    ]
+
     await update.message.reply_text(
-        f"✅ Quiz Saved\nID: {quiz_id}",
+        f"✅ Quiz Saved!\n🆔 {quiz_id}",
         reply_markup=InlineKeyboardMarkup(btn)
     )
 
     context.user_data.clear()
     return ConversationHandler.END
 
-# ───────── GROUP START SYSTEM ─────────
+# ───────── START HERE (PRIVATE) ─────────
+async def play_here(update, context):
+    q = update.callback_query
+    await q.answer()
+
+    quiz_id = q.data.split("_")[1]
+    quiz = context.bot_data.get("quizzes", {}).get(quiz_id)
+
+    if not quiz:
+        return await q.edit_message_text("❌ Quiz not found")
+
+    context.chat_data['quiz'] = {
+        "quiz": quiz,
+        "index": 0,
+        "score": {}
+    }
+
+    await q.message.reply_text(f"🎯 {quiz['title']} (Started Here)")
+    await send_q(context, q.message.chat.id)
+
+# ───────── READY SYSTEM (GROUP) ─────────
 async def ready_btn(update, context):
     q = update.callback_query
     await q.answer()
 
     if q.message.chat.type == "private":
-        await q.message.reply_text("❌ Ready system only works in group")
+        await q.message.reply_text("❌ Ready system only for groups")
         return
 
     data = context.chat_data.get("waiting")
@@ -148,9 +193,6 @@ async def ready_btn(update, context):
 
         await send_q(context, q.message.chat.id)
 
-# ───────── READY SYSTEM ─────────
-
-
 # ───────── SEND QUESTIONS ─────────
 async def send_q(context, chat_id):
     data = context.chat_data.get('quiz')
@@ -170,40 +212,7 @@ async def send_q(context, chat_id):
     q = quiz['questions'][data['index']]
 
     opts = q['opts'].copy()
-    if quizasync def ready_btn(update, context):
-    q = update.callback_query
-    await q.answer()
-
-    # ❗ PRIVATE CHECK
-    if q.message.chat.type == "private":
-        await q.message.reply_text("❌ Ready system group me use hota hai")
-        return
-
-    data = context.chat_data.get("waiting")
-    if not data:
-        return
-
-    user = q.from_user.id
-    data['players'].add(user)
-
-    count = len(data['players'])
-
-    await q.message.edit_text(f"👥 Players Ready: {count}\nNeed 2 to start")
-
-    # ✅ only group me 2 required
-    if count >= 2:
-        await q.message.reply_text("⏳ Starting in 3 sec...")
-        await asyncio.sleep(3)
-
-        context.chat_data['quiz'] = {
-            "quiz": data['quiz'],
-            "index": 0,
-            "score": {}
-        }
-
-        context.chat_data.pop("waiting", None)
-
-        await send_q(context, q.message.chat.id)['shuffle']:
+    if quiz['shuffle']:
         random.shuffle(opts)
 
     await context.bot.send_poll(
@@ -266,7 +275,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
-    app.add_handler(CallbackQueryHandler(start_btn, pattern="^start_"))
+    app.add_handler(CallbackQueryHandler(play_here, pattern="^play_"))
     app.add_handler(CallbackQueryHandler(ready_btn, pattern="^ready$"))
     app.add_handler(PollAnswerHandler(answer))
 
