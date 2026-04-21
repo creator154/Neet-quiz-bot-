@@ -100,7 +100,12 @@ async def negative(update, context):
     quiz_id = str(uuid.uuid4())[:8]
     context.bot_data.setdefault("quizzes", {})[quiz_id] = context.user_data.copy()
 
-    btn = [[InlineKeyboardButton("🚀 Start in Group", callback_data=f"start_{quiz_id}")]]
+    btn = [[
+    InlineKeyboardButton(
+        "🚀 Start Quiz in Group",
+        url=f"https://t.me/{context.bot.username}?startgroup={quiz_id}"
+    )
+]]
     await update.message.reply_text(
         f"✅ Quiz Saved\nID: {quiz_id}",
         reply_markup=InlineKeyboardMarkup(btn)
