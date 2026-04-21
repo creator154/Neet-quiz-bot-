@@ -115,26 +115,38 @@ async def negative(update, context):
     return ConversationHandler.END
 
 # ───────── GROUP START SYSTEM ─────────
-async def start_btn(update, context):
+async def ready_btn(update, context):
     q = update.callback_query
     await q.answer()
 
-    quiz_id = q.data.split("_")[1]
-    quiz = context.bot_data["quizzes"].get(quiz_id)
+    if q.message.chat.type == "private":
+        await q.message.reply_text("❌ Ready system only works in group")
+        return
 
-    if not quiz:
-        return await q.edit_message_text("❌ Quiz not found")
+    data = context.chat_data.get("waiting")
+    if not data:
+        return
 
-    context.chat_data['waiting'] = {
-        "quiz": quiz,
-        "players": set()
-    }
+    user = q.from_user.id
+    data['players'].add(user)
 
-    btn = [[InlineKeyboardButton("✅ Ready", callback_data="ready")]]
-    await q.message.reply_text(
-        f"🎯 {quiz['title']}\n\nPress Ready (min 2 players)",
-        reply_markup=InlineKeyboardMarkup(btn)
-    )
+    count = len(data['players'])
+
+    await q.message.edit_text(f"👥 Players Ready: {count}\nNeed 2 to start")
+
+    if count >= 2:
+        await q.message.reply_text("⏳ Starting in 3 sec...")
+        await asyncio.sleep(3)
+
+        context.chat_data['quiz'] = {
+            "quiz": data['quiz'],
+            "index": 0,
+            "score": {}
+        }
+
+        context.chat_data.pop("waiting", None)
+
+        await send_q(context, q.message.chat.id)
 
 # ───────── READY SYSTEM ─────────
 
