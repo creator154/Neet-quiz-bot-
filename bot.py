@@ -137,34 +137,7 @@ async def start_btn(update, context):
     )
 
 # ───────── READY SYSTEM ─────────
-async def ready_btn(update, context):
-    q = update.callback_query
-    await q.answer()
 
-    data = context.chat_data.get("waiting")
-    if not data:
-        return
-
-    user = q.from_user.id
-    data['players'].add(user)
-
-    count = len(data['players'])
-
-    await q.message.edit_text(f"👥 Players Ready: {count}\nNeed 2 to start")
-
-    if count >= 2:
-        await q.message.reply_text("⏳ Starting in 3 sec...")
-        await asyncio.sleep(3)
-
-        context.chat_data['quiz'] = {
-            "quiz": data['quiz'],
-            "index": 0,
-            "score": {}
-        }
-
-        context.chat_data.pop("waiting", None)
-
-        await send_q(context, q.message.chat.id)
 
 # ───────── SEND QUESTIONS ─────────
 async def send_q(context, chat_id):
@@ -185,7 +158,40 @@ async def send_q(context, chat_id):
     q = quiz['questions'][data['index']]
 
     opts = q['opts'].copy()
-    if quiz['shuffle']:
+    if quizasync def ready_btn(update, context):
+    q = update.callback_query
+    await q.answer()
+
+    # ❗ PRIVATE CHECK
+    if q.message.chat.type == "private":
+        await q.message.reply_text("❌ Ready system group me use hota hai")
+        return
+
+    data = context.chat_data.get("waiting")
+    if not data:
+        return
+
+    user = q.from_user.id
+    data['players'].add(user)
+
+    count = len(data['players'])
+
+    await q.message.edit_text(f"👥 Players Ready: {count}\nNeed 2 to start")
+
+    # ✅ only group me 2 required
+    if count >= 2:
+        await q.message.reply_text("⏳ Starting in 3 sec...")
+        await asyncio.sleep(3)
+
+        context.chat_data['quiz'] = {
+            "quiz": data['quiz'],
+            "index": 0,
+            "score": {}
+        }
+
+        context.chat_data.pop("waiting", None)
+
+        await send_q(context, q.message.chat.id)['shuffle']:
         random.shuffle(opts)
 
     await context.bot.send_poll(
