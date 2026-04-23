@@ -3,24 +3,27 @@ import uuid
 import asyncio
 from collections import defaultdict
 
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    PollAnswerHandler,
+    ContextTypes,
+    filters,
 )
 
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
 
-# ====== STORAGE ======
+# ===== STORAGE =====
 quizzes = {}
 user_state = {}
 active_games = {}
 
-# ====== CREATE QUIZ FLOW ======
+# ===== CREATE QUIZ =====
 
 async def create_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state[update.effective_user.id] = {"step": "title"}
@@ -70,7 +73,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Send correct option number (1-4):")
         return
 
-    # CORRECT ANSWER
+    # CORRECT
     elif state["step"] == "correct":
         idx = int(text) - 1
         state["current_q"]["correct"] = idx
@@ -78,9 +81,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         state["step"] = "question"
 
-        await update.message.reply_text(
-            "✔ Question added!\nSend next question or /done"
-        )
+        await update.message.reply_text("✔ Question added!\nSend next or /done")
         return
 
 # DONE
@@ -94,7 +95,6 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz_id = str(uuid.uuid4())[:8]
 
     quizzes[quiz_id] = data
-
     del user_state[user_id]
 
     keyboard = [
@@ -107,7 +107,7 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# ====== START BUTTONS ======
+# ===== START =====
 
 async def start_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -115,7 +115,6 @@ async def start_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     quiz_id = data.split("_")[1]
-
     quiz = quizzes[quiz_id]
 
     chat_id = query.message.chat.id
@@ -128,16 +127,14 @@ async def start_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "required": 1 if data.startswith("solo") else 2
     }
 
-    keyboard = [
-        [InlineKeyboardButton("✅ I am ready", callback_data="ready")]
-    ]
+    keyboard = [[InlineKeyboardButton("✅ I am ready", callback_data="ready")]]
 
     await query.message.reply_text(
         f"🎯 {quiz['title']}\n\nPlayers needed: {active_games[chat_id]['required']}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# ====== READY BUTTON ======
+# ===== READY =====
 
 async def ready_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -147,7 +144,6 @@ async def ready_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
 
     game = active_games.get(chat_id)
-
     if not game:
         return
 
@@ -164,7 +160,7 @@ async def ready_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await send_question(chat_id, context)
 
-# ====== SEND QUESTION ======
+# ===== SEND QUESTION =====
 
 async def send_question(chat_id, context):
     game = active_games.get(chat_id)
@@ -191,23 +187,26 @@ async def send_question(chat_id, context):
 
     game["poll_id"] = msg.poll.id
 
-# ====== POLL ANSWER ======
+# ===== POLL ANSWER =====
 
 async def poll_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.poll_answer
 
     for chat_id, game in active_games.items():
         if game.get("poll_id") == answer.poll_id:
+
             user = answer.user.id
+
             if answer.option_ids:
                 if answer.option_ids[0] == game["quiz"]["questions"][game["index"]]["correct"]:
                     game["scores"][user] += 1
 
             game["index"] += 1
+
             await asyncio.sleep(2)
             await send_question(chat_id, context)
 
-# ====== END QUIZ ======
+# ===== END =====
 
 async def end_quiz(chat_id, context):
     game = active_games.get(chat_id)
@@ -225,7 +224,7 @@ async def end_quiz(chat_id, context):
 
     del active_games[chat_id]
 
-# ====== MAIN ======
+# ===== MAIN =====
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -237,7 +236,8 @@ def main():
     app.add_handler(CallbackQueryHandler(start_buttons, pattern="^(solo|group)_"))
     app.add_handler(CallbackQueryHandler(ready_btn, pattern="^ready$"))
 
-    app.add_handler(MessageHandler(filters.POLL_ANSWER, poll_handler))
+    # ✅ FIXED HANDLER
+    app.add_handler(PollAnswerHandler(poll_handler))
 
     app.run_polling()
 
