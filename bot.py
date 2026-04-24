@@ -1,6 +1,14 @@
 import logging, os, uuid, asyncio, random
-from telegram import *
-from telegram.ext import *
+from telegram import (
+    Update, KeyboardButton, ReplyKeyboardMarkup,
+    InlineKeyboardButton, InlineKeyboardMarkup,
+    KeyboardButtonPollType, Poll
+)
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler,
+    CallbackQueryHandler, ConversationHandler,
+    PollAnswerHandler, ContextTypes, filters
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,7 +25,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
-# ================= CREATE FLOW =================
+# ================= CREATE =================
 async def create(update, context):
     await update.message.reply_text("📌 Send Quiz Title")
     return TITLE
@@ -29,19 +37,19 @@ async def save_title(update, context):
 
 async def save_desc(update, context):
     context.user_data['desc'] = update.message.text
-    return await ask_question(update, context)
+    return await ask_q(update, context)
 
 async def skip_desc(update, context):
     context.user_data['desc'] = ""
-    return await ask_question(update, context)
+    return await ask_q(update, context)
 
-async def ask_question(update, context):
+async def ask_q(update, context):
     kb = [[KeyboardButton("➕ Add Question", request_poll=KeyboardButtonPollType(type="quiz"))]]
     context.user_data['questions'] = []
     await update.message.reply_text("Add Questions", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return QUESTION
 
-async def save_question(update, context):
+async def save_q(update, context):
     poll = update.message.poll
     context.user_data['questions'].append({
         "q": poll.question,
@@ -91,31 +99,30 @@ async def set_shuffle(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ================= START HANDLER =================
+# ================= START BUTTON =================
 async def start_buttons(update, context):
     q = update.callback_query
     await q.answer()
 
-    data = q.data
-    quiz_id = data.split("_")[1]
-    quiz = context.bot_data["quizzes"].get(quiz_id)
+    quiz_id = q.data.split("_")[1]
+    quiz = context.bot_data.get("quizzes", {}).get(quiz_id)
 
     if not quiz:
         return await q.edit_message_text("Quiz not found")
 
     # BOT MODE
-    if data.startswith("startbot"):
+    if q.data.startswith("startbot"):
+        context.chat_data.clear()
         context.chat_data['quiz'] = {
             "quiz": quiz,
             "index": 0,
             "score": {},
-            "players": set()
         }
         await q.message.reply_text(f"🚀 {quiz['title']}")
         await send_question(context, q.message.chat.id)
 
     # GROUP MODE
-    if data.startswith("startgrp"):
+    if q.data.startswith("startgrp"):
         context.chat_data['waiting'] = {
             "quiz": quiz,
             "players": set()
@@ -127,49 +134,39 @@ async def start_buttons(update, context):
             reply_markup=InlineKeyboardMarkup(btn)
         )
 
-# ================= READY SYSTEM =================
+# ================= READY =================
 async def ready_handler(update, context):
     q = update.callback_query
     await q.answer()
 
-    user = q.from_user.id
-    waiting = context.chat_data.get('waiting')
-
+    waiting = context.chat_data.get("waiting")
     if not waiting:
         return
 
-    waiting['players'].add(user)
+    user = q.from_user.id
+    waiting["players"].add(user)
 
-    count = len(waiting['players'])
-    await q.message.reply_text(f"👤 Players Ready: {count}")
+    count = len(waiting["players"])
+    await q.message.reply_text(f"👤 Ready: {count}")
 
     if count >= 2:
         await q.message.reply_text("⏳ Starting in 3 sec...")
         await asyncio.sleep(3)
 
+        context.chat_data.clear()
         context.chat_data['quiz'] = {
             "quiz": waiting['quiz'],
             "index": 0,
-            "score": {},
-            "players": waiting['players']
+            "score": {}
         }
 
-        context.chat_data.pop('waiting')
         await send_question(context, q.message.chat.id)
 
 # ================= QUIZ ENGINE =================
-
-# ================= ANSWERS =================
-async def answer(update, context):
-    ans = update.poll_answer
-    user = ans.user.id
-
+async def send_question(context, chat_id):
     data = context.chat_data.get('quiz')
     if not data:
         return
-
-    if ans.option_ids and ans.option_ids[0] == data.get('current_correct'):
-        data['score'][user] = data['score'].get(user, 0) + 1
 
     quiz = data['quiz']
 
@@ -179,7 +176,6 @@ async def answer(update, context):
             text += f"{uid} → {sc}\n"
 
         await context.bot.send_message(chat_id, text)
-        context.chat_data.pop('quiz', None)
         return
 
     q = quiz['questions'][data['index']]
@@ -193,24 +189,34 @@ async def answer(update, context):
         correct = opts.index(correct_text)
 
     poll = await context.bot.send_poll(
-        chat_id=chat_id,
-        question=q['q'],
-        options=opts,
+        chat_id,
+        q['q'],
+        opts,
         type=Poll.QUIZ,
         correct_option_id=correct,
         is_anonymous=False,
-        open_period=quiz.get('timer', 30)
+        open_period=quiz['timer']
     )
 
-    # SAVE CURRENT QUESTION DATA
     data['current_correct'] = correct
-    data['current_poll'] = poll.poll.id
-
     data['index'] += 1
 
-    # ⚠️ IMPORTANT: delay ke baad next question
-    context.application.create_task(next_question_delay(context, chat_id, quiz.get('timer', 30)))orrect']:
-        data['score'][user] = data['score'].get(user, 0) + 1
+    context.application.create_task(next_q(context, chat_id, quiz['timer']))
+
+async def next_q(context, chat_id, delay):
+    await asyncio.sleep(delay + 1)
+    await send_question(context, chat_id)
+
+# ================= ANSWER =================
+async def answer(update, context):
+    ans = update.poll_answer
+    data = context.chat_data.get('quiz')
+    if not data:
+        return
+
+    if ans.option_ids and ans.option_ids[0] == data['current_correct']:
+        uid = ans.user.id
+        data['score'][uid] = data['score'].get(uid, 0) + 1
 
 # ================= MAIN =================
 def main():
@@ -225,7 +231,7 @@ def main():
                 CommandHandler("skip", skip_desc)
             ],
             QUESTION:[
-                MessageHandler(filters.POLL, save_question),
+                MessageHandler(filters.POLL, save_q),
                 CommandHandler("done", done)
             ],
             TIMER:[MessageHandler(filters.TEXT, set_timer)],
@@ -236,7 +242,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
-    app.add_handler(CallbackQueryHandler(start_buttons, pattern="start"))
+    app.add_handler(CallbackQueryHandler(start_buttons))
     app.add_handler(CallbackQueryHandler(ready_handler, pattern="ready"))
     app.add_handler(PollAnswerHandler(answer))
 
