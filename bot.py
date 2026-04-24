@@ -1,3 +1,4 @@
+import os
 import logging, json, random
 from telegram import *
 from telegram.ext import *
