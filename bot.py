@@ -158,43 +158,6 @@ async def ready_handler(update, context):
         await send_question(context, q.message.chat.id)
 
 # ================= QUIZ ENGINE =================
-async def send_question(context, chat_id):
-    data = context.chat_data.get('quiz')
-    quiz = data['quiz']
-
-    if data['index'] >= len(quiz['questions']):
-        text = "🏆 Leaderboard:\n"
-        for uid, sc in sorted(data['score'].items(), key=lambda x: x[1], reverse=True):
-            text += f"{uid} → {sc}\n"
-
-        await context.bot.send_message(chat_id, text)
-        return
-
-    q = quiz['questions'][data['index']]
-
-    opts = q['opts'].copy()
-    correct = q['ans']
-
-    if quiz['shuffle']:
-        random.shuffle(opts)
-        correct = opts.index(q['opts'][q['ans']])
-
-    msg = await context.bot.send_poll(
-        chat_id,
-        q['q'],
-        opts,
-        type=Poll.QUIZ,
-        correct_option_id=correct,
-        open_period=quiz['timer'],
-        is_anonymous=False
-    )
-
-    data['poll'] = msg.poll.id
-    data['correct'] = correct
-    data['index'] += 1
-
-    await asyncio.sleep(quiz['timer'] + 1)
-    await send_question(context, chat_id)
 
 # ================= ANSWERS =================
 async def answer(update, context):
@@ -205,7 +168,50 @@ async def answer(update, context):
     if not data:
         return
 
-    if ans.option_ids and ans.option_ids[0] == data['correct']:
+    if ans.option_ids and ans.option_ids[0] == data['casync def send_question(context, chat_id):
+    data = context.chat_data.get('quiz')
+    if not data:
+        return
+
+    quiz = data['quiz']
+
+    if data['index'] >= len(quiz['questions']):
+        text = "🏆 Leaderboard:\n"
+        for uid, sc in sorted(data['score'].items(), key=lambda x: x[1], reverse=True):
+            text += f"{uid} → {sc}\n"
+
+        await context.bot.send_message(chat_id, text)
+        context.chat_data.pop('quiz', None)
+        return
+
+    q = quiz['questions'][data['index']]
+
+    opts = q['opts'].copy()
+    correct = q['ans']
+
+    if quiz['shuffle']:
+        correct_text = opts[correct]
+        random.shuffle(opts)
+        correct = opts.index(correct_text)
+
+    poll = await context.bot.send_poll(
+        chat_id=chat_id,
+        question=q['q'],
+        options=opts,
+        type=Poll.QUIZ,
+        correct_option_id=correct,
+        is_anonymous=False,
+        open_period=quiz.get('timer', 30)
+    )
+
+    # SAVE CURRENT QUESTION DATA
+    data['current_correct'] = correct
+    data['current_poll'] = poll.poll.id
+
+    data['index'] += 1
+
+    # ⚠️ IMPORTANT: delay ke baad next question
+    context.application.create_task(next_question_delay(context, chat_id, quiz.get('timer', 30)))orrect']:
         data['score'][user] = data['score'].get(user, 0) + 1
 
 # ================= MAIN =================
