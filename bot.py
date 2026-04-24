@@ -1,4 +1,4 @@
-impofrom telegram.ext import Application
+from telegram.ext import Application
 from config import BOT_TOKEN
 
 from handlers.start import start_handler
