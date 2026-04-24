@@ -168,10 +168,8 @@ async def answer(update, context):
     if not data:
         return
 
-    if ans.option_ids and ans.option_ids[0] == data['casync def send_question(context, chat_id):
-    data = context.chat_data.get('quiz')
-    if not data:
-        return
+    if ans.option_ids and ans.option_ids[0] == data.get('current_correct'):
+        data['score'][user] = data['score'].get(user, 0) + 1
 
     quiz = data['quiz']
 
