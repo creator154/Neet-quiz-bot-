@@ -1,9 +1,20 @@
-from telegram.ext import CommandHandler
-import uuid
+from telegram.ext import ConversationHandler, CommandHandler, MessageHandler, filters
 
-async def save_quiz(update, context):
-    quiz_id = str(uuid.uuid4())[:8]
-    context.bot_data.setdefault("quizzes", {})[quiz_id] = context.user_data.copy()
-    await update.message.reply_text(f"✅ Quiz Saved ID: {quiz_id}")
+CREATE_NAME = 1
 
-create_handler = CommandHandler("save", save_quiz)
+async def create_start(update, context):
+    await update.message.reply_text("Quiz ka title bhejo:")
+    return CREATE_NAME
+
+async def get_name(update, context):
+    context.user_data["title"] = update.message.text
+    await update.message.reply_text("Title saved ✅")
+    return ConversationHandler.END
+
+create_handler = ConversationHandler(
+    entry_points=[CommandHandler("create", create_start)],
+    states={
+        CREATE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+    },
+    fallbacks=[],
+)
