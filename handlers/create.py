@@ -1,117 +1,161 @@
-from telegram import KeyboardButton, ReplyKeyboardMarkup, KeyboardButtonPollType
-from telegram.ext import ConversationHandler, CommandHandler, MessageHandler, filters
+import uuid
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove
+)
+from telegram.ext import (
+    ContextTypes,
+    ConversationHandler,
+    CommandHandler,
+    MessageHandler,
+    filters
+)
 
-TITLE, DESC, QUESTION, TIMER, SHUFFLE = range(5)
+# STATES
+TITLE, DESCRIPTION, QUESTION, TIMER, SHUFFLE = range(5)
 
-# ───── START ─────
-async def create_start(update, context):
-    context.user_data.clear()
+
+# ================= START CREATE =================
+async def create_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    quiz_id = str(uuid.uuid4())[:8]
+
+    context.bot_data.setdefault("quizzes", {})[quiz_id] = {
+        "title": "",
+        "description": "",
+        "questions": [],
+        "timer": 30,
+        "shuffle": False
+    }
+
+    context.user_data["quiz_id"] = quiz_id
+
     await update.message.reply_text("📌 Quiz ka title bhejo:")
     return TITLE
 
-# ───── TITLE ─────
-async def get_title(update, context):
-    context.user_data["title"] = update.message.text
-    await update.message.reply_text("📝 Description bhejo ya /skip:")
-    return DESC
 
-# ───── DESCRIPTION ─────
-async def get_desc(update, context):
-    context.user_data["desc"] = update.message.text
-    return await ask_question(update, context)
+# ================= TITLE =================
+async def get_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    quiz = context.bot_data["quizzes"][context.user_data["quiz_id"]]
+    quiz["title"] = update.message.text
 
-async def skip_desc(update, context):
-    context.user_data["desc"] = ""
-    return await ask_question(update, context)
+    await update.message.reply_text("📝 Description bhejo:")
+    return DESCRIPTION
 
-# ───── ADD QUESTION BUTTON ─────
-async def ask_question(update, context):
-    context.user_data["questions"] = []
 
-    kb = [[KeyboardButton("➕ Add Question", request_poll=KeyboardButtonPollType(type="quiz"))]]
+# ================= DESCRIPTION =================
+async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    quiz = context.bot_data["quizzes"][context.user_data["quiz_id"]]
+    quiz["description"] = update.message.text
 
     await update.message.reply_text(
-        "🎯 Ab question add karo:",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+        "📊 Ab poll bhejo (Telegram quiz poll).\n"
+        "Multiple questions bhej sakte ho.\n"
+        "Finish karne ke liye /done likho."
     )
     return QUESTION
 
-# ───── SAVE POLL ─────
-async def save_question(update, context):
+
+# ================= RECEIVE POLL =================
+async def get_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.poll:
+        await update.message.reply_text("❌ Sirf quiz poll bhejo!")
+        return QUESTION
+
     poll = update.message.poll
 
     if poll.type != "quiz":
-        await update.message.reply_text("❌ Sirf quiz poll bhejo")
+        await update.message.reply_text("❌ Quiz type poll bhejo (correct answer wala)")
         return QUESTION
 
-    context.user_data["questions"].append({
-        "q": poll.question,
-        "opts": [o.text for o in poll.options],
-        "ans": poll.correct_option_id
+    quiz = context.bot_data["quizzes"][context.user_data["quiz_id"]]
+
+    quiz["questions"].append({
+        "question": poll.question,
+        "options": [o.text for o in poll.options],
+        "correct": poll.correct_option_id
     })
 
-    kb = [
-        [KeyboardButton("➕ Next Question", request_poll=KeyboardButtonPollType(type="quiz"))],
-        [KeyboardButton("/done")]
-    ]
-
     await update.message.reply_text(
-        f"✅ Saved ({len(context.user_data['questions'])})\nNext ya /done",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+        f"✅ Saved ({len(quiz['questions'])})\nNext ya /done"
     )
     return QUESTION
 
-# ───── DONE → TIMER ─────
-async def done(update, context):
-    if not context.user_data.get("questions"):
-        await update.message.reply_text("❌ Pehle question add karo")
+
+# ================= DONE =================
+async def done_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    quiz = context.bot_data["quizzes"][context.user_data["quiz_id"]]
+
+    if not quiz["questions"]:
+        await update.message.reply_text("❌ Pehle atleast 1 question add karo")
         return QUESTION
 
-    kb = [["10","20","30","45","60"]]
-
-    await update.message.reply_text(
-        "⏱ Timer select karo (seconds):",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
-    )
+    await update.message.reply_text("⏱ Timer select karo (seconds):")
     return TIMER
 
-# ───── TIMER ─────
-async def set_timer(update, context):
-    context.user_data["timer"] = int(update.message.text)
 
-    kb = [["Shuffle","No Shuffle"]]
+# ================= TIMER =================
+async def set_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    quiz = context.bot_data["quizzes"][context.user_data["quiz_id"]]
+
+    try:
+        quiz["timer"] = int(update.message.text)
+    except:
+        await update.message.reply_text("❌ Number bhejo (seconds)")
+        return TIMER
+
+    keyboard = [["Shuffle", "No Shuffle"]]
 
     await update.message.reply_text(
         "🔀 Shuffle chahiye?",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
     return SHUFFLE
 
-# ───── SHUFFLE ─────
-async def set_shuffle(update, context):
-    context.user_data["shuffle"] = update.message.text == "Shuffle"
 
-    await update.message.reply_text("✅ Quiz fully ready ho gaya!")
+# ================= SHUFFLE =================
+async def set_shuffle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    quiz = context.bot_data["quizzes"][context.user_data["quiz_id"]]
 
-    # 👉 yahan baad me Start button add karenge
+    text = update.message.text.lower()
+
+    if "shuffle" in text:
+        quiz["shuffle"] = True
+    else:
+        quiz["shuffle"] = False
+
+    # REMOVE OLD KEYBOARD
+    await update.message.reply_text(
+        "Processing...",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    # FINAL BUTTONS
+    keyboard = [
+        ["▶️ Start Quiz"],
+        ["🌍 Start in Group"]
+    ]
+
+    await update.message.reply_text(
+        "✅ Quiz fully ready ho gaya!\nAb start karo 👇",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+
     return ConversationHandler.END
 
 
-# ───── HANDLER ─────
+# ================= HANDLER =================
 create_handler = ConversationHandler(
     entry_points=[CommandHandler("create", create_start)],
     states={
         TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title)],
-        DESC: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, get_desc),
-            CommandHandler("skip", skip_desc)
-        ],
+        DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_description)],
         QUESTION: [
-            MessageHandler(filters.POLL, save_question),
-            CommandHandler("done", done)
+            MessageHandler(filters.POLL, get_poll),
+            CommandHandler("done", done_questions)
         ],
-        TIMER: [MessageHandler(filters.TEXT, set_timer)],
-        SHUFFLE: [MessageHandler(filters.TEXT, set_shuffle)],
+        TIMER: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_timer)],
+        SHUFFLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_shuffle)],
     },
-    fallbacks=[],
+    fallbacks=[]
     )
