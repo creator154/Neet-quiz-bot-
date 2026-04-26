@@ -1,23 +1,27 @@
-from telegram.ext import Application
-from config import BOT_TOKEN
+import os,asyncio
+from dotenv import load_dotenv
+from aiogram import Bot,Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
+from database import init_db
 
-from handlers.start import start_handler
-from handlers.create import create_handler
-from handlers.buttons import button_handler
-from handlers.ready import ready_handler
-from handlers.answer import answer_handler
+from handlers.create_quiz import router as create_router
+from handlers.take_quiz import router as take_router
+from handlers.leaderboard import router as lb_router
+from handlers.edit_quiz import router as edit_router
 
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+load_dotenv()
 
-    app.add_handler(start_handler)
-    app.add_handler(create_handler)
-    app.add_handler(button_handler)
-    app.add_handler(ready_handler)
-    app.add_handler(answer_handler)
+bot=Bot(os.getenv("BOT_TOKEN"))
+dp=Dispatcher(storage=MemoryStorage())
 
-    print("Bot running...")
-    app.run_polling()
+dp.include_router(create_router)
+dp.include_router(take_router)
+dp.include_router(lb_router)
+dp.include_router(edit_router)
 
-if __name__ == "__main__":
-    main()
+async def main():
+    await init_db()
+    await dp.start_polling(bot)
+
+if __name__=="__main__":
+    asyncio.run(main())
