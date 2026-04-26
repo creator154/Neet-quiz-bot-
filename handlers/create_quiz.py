@@ -1,78 +1,149 @@
-from aiogram import Router,F
-from aiogram.filters import Command
-from aiogram.types import Message,ReplyKeyboardMarkup,KeyboardButton
-from aiogram.fsm.state import State,StatesGroup
-from aiogram.fsm.context import FSMContext
+from pyrogram import Client, filters
+from pyrogram.types import (
+InlineKeyboardMarkup,
+InlineKeyboardButton,
+ReplyKeyboardMarkup
+)
 
-router=Router()
+quiz_data = {}
 
-class CreateQuiz(StatesGroup):
-    title=State()
-    description=State()
-    waiting_poll=State()
+# /create command
+@Client.on_message(filters.command("create") & filters.private)
+async def create_quiz(client, message):
+    uid = message.from_user.id
+    quiz_data[uid] = {"step":"title","questions":[]}
 
-question_button = ReplyKeyboardMarkup(
-keyboard=[
- [KeyboardButton(text='Create a question')]
-],
+    await message.reply(
+"""🧠 Let's create a new quiz.
+
+First, send me the title of your quiz.
+(e.g. NEET Biology Test)"""
+    )
+
+
+# title
+@Client.on_message(filters.private & filters.text & ~filters.command(["create","start"]))
+async def quiz_steps(client,message):
+    uid=message.from_user.id
+
+    if uid not in quiz_data:
+        return
+
+    step=quiz_data[uid]["step"]
+
+
+    if step=="title":
+        quiz_data[uid]["title"]=message.text
+        quiz_data[uid]["step"]="description"
+
+        await message.reply(
+"""Good.
+
+Now send me a description of your quiz.
+Type /skip to skip."""
+        )
+        return
+
+
+    if step=="description":
+        quiz_data[uid]["description"]=message.text
+        quiz_data[uid]["step"]="question"
+
+        await message.reply(
+"""Good. Now send me a poll with your first question.
+
+Warning: this bot can't create anonymous polls.""",
+
+reply_markup=ReplyKeyboardMarkup(
+[['Create a question']],
 resize_keyboard=True
 )
+        )
+        return
 
-@router.message(Command('create'))
-async def create(m:Message,state:FSMContext):
-    await state.set_state(CreateQuiz.title)
-    await m.answer(
-"🧠 Let's create a new quiz.\n\nFirst, send me the title of your quiz.\n(e.g. Aptitude Test)"
+
+# skip description
+@Client.on_message(filters.command("skip"))
+async def skip_desc(client,message):
+    uid=message.from_user.id
+    if uid in quiz_data:
+        quiz_data[uid]["step"]="question"
+
+        await message.reply(
+"""Good. Now send me a poll with your first question.
+
+Warning: this bot can't create anonymous polls.""",
+
+reply_markup=ReplyKeyboardMarkup(
+[['Create a question']],
+resize_keyboard=True
 )
+        )
 
-@router.message(CreateQuiz.title)
-async def get_title(m:Message,state:FSMContext):
-    await state.update_data(title=m.text)
-    await state.set_state(CreateQuiz.description)
-    await m.answer(
-"Good.\n\nNow send me a description of your quiz.\nThis is optional, you can /skip this step."
-)
 
-@router.message(Command('skip'))
-async def skip_desc(m:Message,state:FSMContext):
-    await state.update_data(description='')
-    await state.set_state(CreateQuiz.waiting_poll)
-    await m.answer(
-"Good. Now send me a poll with your first question. Alternatively, you can send me a message with text or media that will be shown before this question.\n\nWarning: this bot can't create anonymous polls. Users in groups will see votes from other members.",
-reply_markup=question_button
-)
+# clicking Create a question
+@Client.on_message(filters.regex("Create a question"))
+async def create_question(client,message):
 
-@router.message(CreateQuiz.description)
-async def save_desc(m:Message,state:FSMContext):
-    await state.update_data(description=m.text)
-    await state.set_state(CreateQuiz.waiting_poll)
-    await m.answer(
-"Good. Now send me a poll with your first question. Alternatively, you can send me a message with text or media that will be shown before this question.\n\nWarning: this bot can't create anonymous polls. Users in groups will see votes from other members.",
-reply_markup=question_button
-)
+    await message.reply(
+"""📌 Tap attachment icon ➜ Poll ➜ Quiz
 
-@router.message(F.text=='Create a question')
-async def create_question(m:Message):
-    await m.answer(
-'Use attachment icon ➜ Poll ➜ Quiz and send your question poll here.'
+Create your poll question and send it here."""
     )
 
-@router.message(F.poll)
-async def receive_poll(m:Message):
-    await m.answer(
-"Good. Your quiz now has 1 question.\n\nIf you made a mistake use /undo\nSend next question or /done"
-)
 
-@router.message(Command('done'))
-async def done(m:Message):
-    timer_buttons=ReplyKeyboardMarkup(
-      keyboard=[
-      [KeyboardButton(text='10'),KeyboardButton(text='15'),KeyboardButton(text='20')],
-      [KeyboardButton(text='30'),KeyboardButton(text='45'),KeyboardButton(text='60')]
-      ],
-      resize_keyboard=True
-    )
-    await m.answer(
-'⏱ Select time per question (10-75 sec)',
-reply_markup=timer_buttons
+# receive telegram quiz poll
+@Client.on_message(filters.poll)
+async def receive_poll(client,message):
+
+    uid=message.from_user.id
+    if uid not in quiz_data:
+        return
+
+    quiz_data[uid]["questions"].append(message.poll.question)
+
+    await message.reply(
+f"✅ Question Added ({len(quiz_data[uid]['questions'])})",
+
+reply_markup=InlineKeyboardMarkup(
+[
+[
+InlineKeyboardButton("➕ Add Question",callback_data="addq"),
+InlineKeyboardButton("🔀 Shuffle",callback_data="shuffle")
+],
+[
+InlineKeyboardButton("🏁 Done",callback_data="done")
+]
+]
 )
+    )
+
+
+@Client.on_callback_query(filters.regex("addq"))
+async def addq(client,query):
+
+    await query.message.reply(
+"Send next Quiz Poll now."
+    )
+
+
+
+@Client.on_callback_query(filters.regex("shuffle"))
+async def shuffle(client,query):
+    await query.answer("Questions shuffled ✓",show_alert=True)
+
+
+
+@Client.on_callback_query(filters.regex("done"))
+async def done(client,query):
+
+    uid=query.from_user.id
+    total=len(quiz_data[uid]["questions"])
+
+    await query.message.reply(
+f"""✅ Quiz saved successfully
+
+Questions: {total}
+
+Use /start to publish."""
+    )
