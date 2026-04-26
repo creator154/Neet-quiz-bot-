@@ -1,128 +1,181 @@
-from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram import Router,F
 from aiogram.types import (
-    Message,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    KeyboardButtonPollType,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
+Message, CallbackQuery,
+InlineKeyboardMarkup,InlineKeyboardButton,
+ReplyKeyboardMarkup,KeyboardButton,
+ReplyKeyboardRemove
 )
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import Command
+from aiogram.fsm.state import State,StatesGroup
 from aiogram.fsm.context import FSMContext
 
-router = Router()
+router=Router()
 
-class CreateQuiz(StatesGroup):
-    title = State()
-    description = State()
-    collecting_questions = State()
+class QuizStates(StatesGroup):
+    title=State()
+    description=State()
+    waiting_poll=State()
+    timer=State()
+    negative=State()
 
-poll_button = ReplyKeyboardMarkup(
-    keyboard=[[
-        KeyboardButton(
-            text="Create a Question",
-            request_poll=KeyboardButtonPollType(type="quiz")
-        )
-    ]],
-    resize_keyboard=True
-)
-
-after_question = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Add Question", callback_data="add_q"),
-            InlineKeyboardButton(text="Shuffle Questions", callback_data="shuffle_q")
-        ],
-        [
-            InlineKeyboardButton(text="Done", callback_data="done_q")
-        ]
-    ]
-)
 
 @router.message(Command("create"))
-async def create_start(message: Message, state: FSMContext):
-    await state.clear()
-    await state.set_state(CreateQuiz.title)
-    await state.update_data(q_count=0)
+async def create_quiz(message:Message,state:FSMContext):
+    await state.set_state(QuizStates.title)
+    await state.update_data(questions=0)
+
     await message.answer(
-        "Let's create a new quiz.\n\nFirst, send me the title of your quiz."
+        "🧠 Let's create a new quiz.\n\n"
+        "First, send me the title of your quiz."
     )
 
-@router.message(CreateQuiz.title)
-async def save_title(message: Message, state: FSMContext):
+
+@router.message(QuizStates.title)
+async def set_title(message:Message,state:FSMContext):
     await state.update_data(title=message.text)
-    await state.set_state(CreateQuiz.description)
-    await message.answer(
-        "Good. Now send me a description of your quiz.\nYou can /skip this step."
-    )
-
-@router.message(Command("skip"))
-async def skip_desc(message: Message, state: FSMContext):
-    current = await state.get_state()
-    if current != CreateQuiz.description:
-        return
-    await state.update_data(description="")
-    await state.set_state(CreateQuiz.collecting_questions)
-    await message.answer(
-        "Good. Now send me a poll with your first question.",
-        reply_markup=poll_button,
-    )
-
-@router.message(CreateQuiz.description)
-async def save_desc(message: Message, state: FSMContext):
-    await state.update_data(description=message.text)
-    await state.set_state(CreateQuiz.collecting_questions)
-    await message.answer(
-        "Good. Now send me a poll with your first question.",
-        reply_markup=poll_button,
-    )
-
-# Receives Telegram Quiz Poll
-@router.message(F.poll)
-async def receive_poll(message: Message, state: FSMContext):
-    current = await state.get_state()
-    if current != CreateQuiz.collecting_questions:
-        return
-
-    data = await state.get_data()
-    count = data.get("q_count",0) + 1
-    await state.update_data(q_count=count)
+    await state.set_state(QuizStates.description)
 
     await message.answer(
-        f"✅ Question {count} added.",
-        reply_markup=after_question
+        "Good.\n\n"
+        "Now send me a description of your quiz.\n"
+        "You can /skip this step."
     )
 
-@router.callback_query(F.data == "add_q")
-async def add_q(cb):
-    await cb.answer()
-    await cb.message.answer(
-        "Tap 'Create a Question' below to add another quiz question.",
-        reply_markup=poll_button
+
+@router.message(QuizStates.description)
+async def set_desc(message:Message,state:FSMContext):
+
+    if message.text=="/skip":
+        await state.update_data(description="")
+    else:
+        await state.update_data(description=message.text)
+
+    await state.set_state(QuizStates.waiting_poll)
+
+    await message.answer(
+      "Good. Now send me a poll with your first question."
     )
 
-@router.callback_query(F.data == "shuffle_q")
-async def shuffle_q(cb):
-    await cb.answer("Questions shuffled ✓", show_alert=True)
 
-@router.callback_query(F.data == "done_q")
-async def done_q(cb, state:FSMContext):
-    data = await state.get_data()
-    total = data.get('q_count',0)
+@router.poll()
+async def receive_poll(message:Message,state:FSMContext):
+    data=await state.get_data()
+    q=data.get("questions",0)+1
 
-    final_menu = InlineKeyboardMarkup(
+    await state.update_data(questions=q)
+
+    await message.answer(
+       f"✅ Question {q} added.\n"
+       "Send next poll or /done"
+    )
+
+
+# DONE -> timer buttons like systemquizbot
+@router.message(Command("done"))
+async def done_quiz(message:Message,state:FSMContext):
+
+    await state.set_state(QuizStates.timer)
+
+    kb=ReplyKeyboardMarkup(
+      keyboard=[
+        [
+         KeyboardButton(text="10"),
+         KeyboardButton(text="15"),
+         KeyboardButton(text="20")
+        ],
+        [
+         KeyboardButton(text="30"),
+         KeyboardButton(text="45"),
+         KeyboardButton(text="60")
+        ]
+      ],
+      resize_keyboard=True
+    )
+
+    await message.answer(
+      "⏱ Select time per question\n(10–75 sec)",
+      reply_markup=kb
+    )
+
+
+@router.message(QuizStates.timer)
+async def timer_set(message:Message,state:FSMContext):
+
+    await state.update_data(timer=message.text)
+    await state.set_state(QuizStates.negative)
+
+    kb=ReplyKeyboardMarkup(
+      keyboard=[
+       [
+        KeyboardButton(text="0"),
+        KeyboardButton(text="0.25"),
+        KeyboardButton(text="0.50")
+       ]
+      ],
+      resize_keyboard=True
+    )
+
+    await message.answer(
+      "➖ Select negative marking",
+      reply_markup=kb
+    )
+
+
+@router.message(QuizStates.negative)
+async def negative_set(message:Message,state:FSMContext):
+
+    await state.update_data(negative=message.text)
+
+    kb=InlineKeyboardMarkup(
       inline_keyboard=[
-       [InlineKeyboardButton(text='Start the Quiz',callback_data='start_quiz')],
-       [InlineKeyboardButton(text='Start in Group',callback_data='start_group')],
-       [InlineKeyboardButton(text='Share Quiz',callback_data='share_quiz')],
-       [InlineKeyboardButton(text='Edit Quiz',callback_data='edit_quiz')],
+        [InlineKeyboardButton(
+         text="Start the Quiz",
+         callback_data="startquiz")],
+
+        [InlineKeyboardButton(
+         text="Start in Group",
+         callback_data="groupquiz")],
+
+        [InlineKeyboardButton(
+         text="Share Quiz",
+         callback_data="sharequiz")],
+
+        [InlineKeyboardButton(
+         text="Edit Quiz",
+         callback_data="editquiz")]
       ]
     )
 
-    await cb.message.answer(
-        f"Quiz created successfully. Questions: {total}",
-        reply_markup=final_menu
+    await message.answer(
+      "Quiz created successfully.",
+      reply_markup=ReplyKeyboardRemove()
     )
-    await cb.answer()
-    await state.clear()
+
+    await message.answer(
+      "Choose option:",
+      reply_markup=kb
+    )
+
+
+@router.callback_query(F.data=="startquiz")
+async def startquiz(call:CallbackQuery):
+    await call.message.answer("Quiz Started ✅")
+    await call.answer()
+
+
+@router.callback_query(F.data=="groupquiz")
+async def groupquiz(call:CallbackQuery):
+    await call.message.answer("Send quiz in group to launch.")
+    await call.answer()
+
+
+@router.callback_query(F.data=="sharequiz")
+async def sharequiz(call:CallbackQuery):
+    await call.message.answer("Share link generated.")
+    await call.answer()
+
+
+@router.callback_query(F.data=="editquiz")
+async def editquiz(call:CallbackQuery):
+    await call.message.answer("Edit mode opened.")
+    await call.answer()
